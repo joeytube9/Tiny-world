@@ -1,48 +1,36 @@
-Tiny World V4 — WORLD CONTROL GUI
+Tiny World V4.1 — THE UNDERGROUND UPDATE
 
-MAIN GUI
-- World tab
-  - Overview
-  - People list / citizen inspection
-  - Village information
-  - Future warfare information
-  - Complete World History
-  - Settings
-  - New World
-  - Update logs
+NEW SECOND WORLD LAYER
+- Surface / Underground toggle keeps the exact same camera position and zoom.
+- Underground is a real separate simulation layer, not a visual filter.
+- Procedural dirt, stone, deep stone, caves, underground water and magma.
+- Ore now exists primarily underground as visible veins.
+- Iron veins are large rust-red metallic clusters.
+- Gold veins are bright yellow deposits.
+- Coal seams and rare crystal deposits added.
+- Underground Resources page has live resource totals.
+- Underground God Powers: Cave, Fill Stone, Water, Magma, Iron, Gold, Coal, Crystal, Reveal.
 
-- God Powers tab
-  - Raise land / water / mountain
-  - Grassland / desert / snow
-  - Rain / drought / lightning
-  - Fire / lava
-  - Heal / bless
-  - Food / trees / stone / iron / gold
+REAL MINING
+- Civilization can construct Mine Entrances after Stoneworking.
+- Completing a mine discovers Mining.
+- Mine entrances line up between Surface and Underground.
+- Miners physically walk to the mine entrance.
+- They descend into the underground layer.
+- They carve tunnels through rock while moving.
+- They extract stone, iron, gold and coal.
+- They haul resources back to the shaft, return to the surface, and deliver them to the settlement.
+- Underground miners can be watched live by switching layers.
 
-- Resources tab
-  - Biomes
-  - Stone / iron / gold deposits
-  - Trees / wild food
-  - Deer / sheep / wolves
-  - Spawn human / couple / family
-  - Live world resource counts
-
-SIMULATION ADDITIONS
-- Iron and gold are real mineable resources.
-- Miners can carry stone, iron or gold back to the settlement.
-- Deer, sheep and wolves are living world entities.
-- Wolves can pursue deer/sheep.
-- Fire burns land and can hurt citizens.
-- Lava is persistent terrain and dangerous.
-- Visual settings persist on the device.
-- The V2.1 unified camera/Retina fix remains in place.
-- V3 families, jobs, farming, construction and village growth remain.
+V4 + V3 SYSTEMS RETAINED
+- World / God Powers / Resources GUI
+- Families, jobs, villages, farms, construction
+- Wildlife
+- Fire/lava on the surface
+- Camera/Retina fix
 
 DEPLOY
-This is still a completely flat build.
+Still a flat build. Replace the files in your GitHub tiny-world repo and commit.
 
-Replace your GitHub repository files with the files from this ZIP and commit.
-Cloudflare should redeploy automatically.
-
-Keep your Cloudflare deploy command:
+Cloudflare deploy command remains:
 npx wrangler deploy --assets . --compatibility-date 2026-09-08

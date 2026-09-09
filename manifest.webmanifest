@@ -1,7 +1,7 @@
 {
   "name": "Tiny World",
   "short_name": "Tiny World",
-  "description": "A pocket civilization and god sandbox with world control, powers and resources.",
+  "description": "A pocket civilization god sandbox with a living surface and underground world.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
