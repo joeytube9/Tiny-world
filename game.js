@@ -25,17 +25,54 @@ const techNames=["Shelter","Storage","Agriculture","Stoneworking","Mining","Vill
 let people=[],buildings=[],events=[],particles=[],clouds=[],constructionQueue=[],critters=[];
 let settlement=null,day=1,tick=0,paused=false,speed=1,tool="inspect",brush=12,selected=null,dirty=true,worldSeed=1;
 let camX=WORLD_W/2,camY=WORLD_H/2,zoom=4,displayScale=1,pointers=new Map(),dragging=false,last={x:0,y:0},pinchStart=null,paintStamp=0,lastSim=0,toastTimer=null,nextPersonId=1,nextBuildingId=1,nextCritterId=1;
-let mainTab="world",worldSection="overview",newWorldArmed=false;
+let mainTab="world",worldSection="overview",newWorldArmed=false,resetWorldArmed=false;
 let activeLayer="surface",resourceLayer="surface",undergroundDirty=true;
-let settings={labels:true,trails:true,dayNight:true,effects:true};try{settings=Object.assign(settings,JSON.parse(localStorage.getItem("tinyWorldSettings")||"{}"))}catch(e){}
+const defaultWorldConfig={seed:"random",landmass:50,water:50,forest:52,mountains:42,wildlife:50,startPopulation:2,startingFood:12,startingWood:4};
+let worldConfig=Object.assign({},defaultWorldConfig);
+let lastGeneratedConfig=Object.assign({},defaultWorldConfig);
+let settings={labels:true,trails:true,dayNight:true,effects:true};try{settings=Object.assign(settings,JSON.parse(localStorage.getItem("tinyWorldSettings")||"{}"))}catch(e){}try{worldConfig=Object.assign(worldConfig,JSON.parse(localStorage.getItem("tinyWorldConfig")||"{}"))}catch(e){}
 
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),idx=(x,y)=>y*WORLD_W+x,rnd=(a,b)=>a+Math.random()*(b-a),rndi=(a,b)=>Math.floor(rnd(a,b+1)),lerp=(a,b,t)=>a+(b-a)*t;
 function hash(x,y,s=0){let n=(x*374761393+y*668265263+s*1442695041)|0;n=(n^(n>>13))*1274126177;return((n^(n>>16))>>>0)/4294967295}
 function fade(t){return t*t*(3-2*t)}
 function valueNoise(x,y,scale,seed){const fx=x/scale,fy=y/scale,x0=Math.floor(fx),y0=Math.floor(fy),sx=fade(fx-x0),sy=fade(fy-y0),a=hash(x0,y0,seed),b=hash(x0+1,y0,seed),c=hash(x0,y0+1,seed),d=hash(x0+1,y0+1,seed);return lerp(lerp(a,b,sx),lerp(c,d,sx),sy)}
 function fbm(x,y,s){return valueNoise(x,y,108,s)*.42+valueNoise(x,y,54,s+1)*.27+valueNoise(x,y,26,s+2)*.18+valueNoise(x,y,12,s+3)*.09+valueNoise(x,y,6,s+4)*.04}
-function classify(i){const h=height[i],m=moisture[i];terrain[i]=h<.255?T.DEEP:h<.345?T.WATER:h<.398?T.SAND:h>.855?T.SNOW:h>.735?T.MOUNTAIN:m>.60?T.FOREST:T.GRASS}
+function classify(i){
+  const h=height[i],m=moisture[i];
+  const waterShift=(configValue("water")-50)*.0019-(configValue("landmass")-50)*.0018;
+  const deep=.255+waterShift,waterLine=.345+waterShift,sandLine=.398+waterShift;
+  const mountainShift=(50-configValue("mountains"))*.0017;
+  const snowLine=.855+mountainShift,mountainLine=.735+mountainShift;
+  const forestThreshold=.72-configValue("forest")*.0024;
+  terrain[i]=h<deep?T.DEEP:h<waterLine?T.WATER:h<sandLine?T.SAND:h>snowLine?T.SNOW:h>mountainLine?T.MOUNTAIN:m>forestThreshold?T.FOREST:T.GRASS
+}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+
+function saveWorldConfig(){try{localStorage.setItem("tinyWorldConfig",JSON.stringify(worldConfig))}catch(e){}}
+function configValue(key){return Number(worldConfig[key]??defaultWorldConfig[key])}
+function seedFromInput(v){
+  const s=String(v??"random").trim();
+  if(!s||s.toLowerCase()==="random")return rndi(1,999999999);
+  if(/^\d+$/.test(s))return Math.max(1,Number(s)%2147483647);
+  let h=2166136261>>>0;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return Math.max(1,h>>>0)
+}
+function normalizeWorldConfig(cfg){
+  const c=Object.assign({},defaultWorldConfig,cfg||{});
+  c.landmass=clamp(Number(c.landmass)||50,10,90);
+  c.water=clamp(Number(c.water)||50,10,90);
+  c.forest=clamp(Number(c.forest)||50,0,100);
+  c.mountains=clamp(Number(c.mountains)||40,0,100);
+  c.wildlife=clamp(Number(c.wildlife)||50,0,100);
+  c.startPopulation=clamp(Math.round(Number(c.startPopulation)||2),2,12);
+  c.startingFood=clamp(Math.round(Number(c.startingFood)||12),0,60);
+  c.startingWood=clamp(Math.round(Number(c.startingWood)||4),0,40);
+  c.seed=String(c.seed??"random");
+  return c
+}
+function resetCurrentWorld(){
+  worldConfig=Object.assign({},lastGeneratedConfig);
+  generate(true);
+}
 function showToast(text){clearTimeout(toastTimer);toast.textContent=text;toast.classList.remove("hidden");toastTimer=setTimeout(()=>toast.classList.add("hidden"),1350)}
 function addEvent(text,kind="world"){events.unshift({day:Math.floor(day),text,kind});events=events.slice(0,160);renderHistory()}
 function renderHistory(){historyList.innerHTML=events.map(e=>`<div class="event"><div class="eday">DAY ${e.day}</div><div class="etext">${escapeHtml(e.text)}</div></div>`).join("")}
@@ -308,9 +345,78 @@ function consumeSettlement(){const alive=people.filter(p=>p.alive).length;if(tic
 function simulate(){if(paused)return;const loops=speed===1?1:speed===2?2:5;for(let l=0;l<loops;l++){tick++;day+=.008;people.forEach(think);updateCritters();buildings.forEach(b=>b.age++);updateFarms();consumeSettlement();if(tick%120===0)assignJobs();if(tick%190===0){planVillage();matchPartners();tryBirths()}if(tick%280===0){for(let n=0;n<280;n++){const x=rndi(0,WORLD_W-1),y=rndi(0,WORLD_H-1),i=idx(x,y);if(terrain[i]===T.GRASS&&food[i]<4&&Math.random()<.15)food[i]++;if(terrain[i]===T.FOREST&&trees[i]<4&&Math.random()<.18)trees[i]++;if(wet[i])wet[i]--;if(scar[i])scar[i]--;if(burn[i])burn[i]=Math.max(0,burn[i]-2)}dirty=true}}
   particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.life--;p.vy+=p.type==="leaf"?.006:0});particles=particles.filter(p=>p.life>0);clouds.forEach(c=>{c.life--;c.phase+=.015;c.x+=.015});clouds=clouds.filter(c=>c.life>0);updateUI()}
 
-function generate(){worldSeed=rndi(1,999999);for(let y=0;y<WORLD_H;y++)for(let x=0;x<WORLD_W;x++){const i=idx(x,y),nx=(x-WORLD_W/2)/(WORLD_W/2),ny=(y-WORLD_H/2)/(WORLD_H/2),edge=Math.pow(Math.sqrt(nx*nx+ny*ny),1.18),macro=fbm(x,y,worldSeed),detail=fbm(x+410,y-270,worldSeed+73);height[i]=clamp(macro*.98+detail*.18-edge*.185,.04,.98);moisture[i]=fbm(x-340,y+570,worldSeed+141);classify(i);food[i]=terrain[i]===T.GRASS&&hash(x,y,worldSeed+9)>.94?rndi(1,4):0;trees[i]=terrain[i]===T.FOREST?rndi(1,4):0;rocks[i]=(terrain[i]===T.MOUNTAIN||nearType(x,y,T.MOUNTAIN))&&hash(x,y,worldSeed+21)>.84?rndi(1,3):0;iron[i]=rocks[i]&&hash(x,y,worldSeed+22)>.84?rndi(1,2):0;gold[i]=rocks[i]&&hash(x,y,worldSeed+23)>.965?1:0;wet[i]=scar[i]=burn[i]=trail[i]=0}
-  let sx=WORLD_W>>1,sy=WORLD_H>>1,best=null,bestScore=-999;for(let n=0;n<500;n++){const x=clamp((WORLD_W>>1)+rndi(-95,95),8,WORLD_W-9),y=clamp((WORLD_H>>1)+rndi(-70,70),8,WORLD_H-9),t=terrain[idx(x,y)];if(t!==T.GRASS&&t!==T.FOREST)continue;let score=0;for(let yy=-12;yy<=12;yy+=3)for(let xx=-12;xx<=12;xx+=3){const nx=x+xx,ny=y+yy;if(nx<0||ny<0||nx>=WORLD_W||ny>=WORLD_H)continue;const tt=terrain[idx(nx,ny)];if(tt===T.GRASS||tt===T.FOREST)score++;if(tt===T.WATER)score+=.25}if(score>bestScore){bestScore=score;best={x,y}}}if(best){sx=best.x;sy=best.y}paint(sx,sy,25,"land",false);
-  nextPersonId=1;nextBuildingId=1;nextCritterId=1;people=[makePerson("Mara",sx-2,sy,"F",24),makePerson("Dren",sx+2,sy,"M",26)];people[0].partner=people[1].id;people[1].partner=people[0].id;buildings=[];events=[];particles=[];clouds=[];critters=[];day=1;tick=0;camX=sx;camY=sy;zoom=4;dirty=true;undergroundDirty=true;selected=null;activeLayer="surface";resourceLayer="surface";settlement={name:"First Hearth",x:sx,y:sy,food:12,wood:4,stone:0,iron:0,gold:0,coal:0,tech:new Set(),births:0,deaths:0};generateUnderground();addBuilding("firepit",sx,sy,true);for(let n=0;n<6;n++)spawnCritter("deer",sx+rndi(-22,22),sy+rndi(-18,18),1);addEvent("Mara and Dren founded First Hearth beside a new fire.","founding");assignJobs();clampCamera();updateUI();showToast("V4.1 world started")}
+function generate(useExistingSeed=false){
+  worldConfig=normalizeWorldConfig(worldConfig);
+  saveWorldConfig();
+
+  if(useExistingSeed){
+    worldSeed=seedFromInput(lastGeneratedConfig.seed);
+    worldConfig=Object.assign({},lastGeneratedConfig);
+  }else{
+    worldSeed=seedFromInput(worldConfig.seed);
+    lastGeneratedConfig=Object.assign({},worldConfig,{seed:String(worldSeed)});
+  }
+
+  const landBias=(configValue("landmass")-50)*.0018-(configValue("water")-50)*.0016;
+  const mountainBias=(configValue("mountains")-50)*.0011;
+  const wildlifeScale=configValue("wildlife")/50;
+
+  for(let y=0;y<WORLD_H;y++)for(let x=0;x<WORLD_W;x++){
+    const i=idx(x,y),nx=(x-WORLD_W/2)/(WORLD_W/2),ny=(y-WORLD_H/2)/(WORLD_H/2),edge=Math.pow(Math.sqrt(nx*nx+ny*ny),1.18),macro=fbm(x,y,worldSeed),detail=fbm(x+410,y-270,worldSeed+73);
+    height[i]=clamp(macro*.98+detail*.18-edge*.185+landBias+mountainBias*.22,.04,.98);
+    moisture[i]=clamp(fbm(x-340,y+570,worldSeed+141)+(configValue("forest")-50)*.0016,0,1);
+    classify(i);
+    food[i]=terrain[i]===T.GRASS&&hash(x,y,worldSeed+9)>(.965-configValue("forest")*.0005)?rndi(1,4):0;
+    trees[i]=terrain[i]===T.FOREST?rndi(1,Math.max(1,Math.round(2+configValue("forest")/25))):0;
+    rocks[i]=(terrain[i]===T.MOUNTAIN||nearType(x,y,T.MOUNTAIN))&&hash(x,y,worldSeed+21)>(.90-configValue("mountains")*.0012)?rndi(1,3):0;
+    iron[i]=rocks[i]&&hash(x,y,worldSeed+22)>.84?rndi(1,2):0;
+    gold[i]=rocks[i]&&hash(x,y,worldSeed+23)>.965?1:0;
+    wet[i]=scar[i]=burn[i]=trail[i]=0
+  }
+
+  let sx=WORLD_W>>1,sy=WORLD_H>>1,best=null,bestScore=-999;
+  for(let n=0;n<700;n++){
+    const x=clamp((WORLD_W>>1)+rndi(-110,110),8,WORLD_W-9),y=clamp((WORLD_H>>1)+rndi(-82,82),8,WORLD_H-9),t=terrain[idx(x,y)];
+    if(t!==T.GRASS&&t!==T.FOREST)continue;
+    let score=0;
+    for(let yy=-12;yy<=12;yy+=3)for(let xx=-12;xx<=12;xx+=3){
+      const nx=x+xx,ny=y+yy;if(nx<0||ny<0||nx>=WORLD_W||ny>=WORLD_H)continue;
+      const tt=terrain[idx(nx,ny)];
+      if(tt===T.GRASS||tt===T.FOREST)score++;
+      if(tt===T.WATER)score+=.25
+    }
+    if(score>bestScore){bestScore=score;best={x,y}}
+  }
+  if(best){sx=best.x;sy=best.y}
+  paint(sx,sy,25,"land",false);
+
+  nextPersonId=1;nextBuildingId=1;nextCritterId=1;
+  people=[];
+
+  const startPop=configValue("startPopulation");
+  for(let n=0;n<startPop;n++){
+    const sex=n%2===0?"F":"M";
+    const name=n===0?"Mara":n===1?"Dren":`${names[(n+2)%names.length]} ${n+1}`;
+    people.push(makePerson(name,sx+rndi(-3,3),sy+rndi(-2,2),sex,rndi(19,30)))
+  }
+  if(people.length>=2){people[0].partner=people[1].id;people[1].partner=people[0].id}
+
+  buildings=[];events=[];particles=[];clouds=[];critters=[];
+  day=1;tick=0;camX=sx;camY=sy;zoom=4;dirty=true;undergroundDirty=true;selected=null;
+  activeLayer="surface";resourceLayer="surface";
+  settlement={name:"First Hearth",x:sx,y:sy,food:configValue("startingFood"),wood:configValue("startingWood"),stone:0,iron:0,gold:0,coal:0,tech:new Set(),births:0,deaths:0};
+  generateUnderground();
+  addBuilding("firepit",sx,sy,true);
+
+  const deerCount=Math.round(2+6*wildlifeScale),sheepCount=Math.round(3*wildlifeScale),wolfCount=Math.round(1.5*wildlifeScale);
+  for(let n=0;n<deerCount;n++)spawnCritter("deer",sx+rndi(-28,28),sy+rndi(-22,22),1);
+  for(let n=0;n<sheepCount;n++)spawnCritter("sheep",sx+rndi(-30,30),sy+rndi(-24,24),1);
+  for(let n=0;n<wolfCount;n++)spawnCritter("wolf",sx+rndi(-42,42),sy+rndi(-32,32),1);
+
+  addEvent(`${people.map(p=>p.name).slice(0,2).join(" and ")} founded First Hearth in world seed ${worldSeed}.`,"founding");
+  assignJobs();clampCamera();updateUI();
+  showToast(useExistingSeed?"World reset":"New customized world created")
+}
 
 function drawTrails(){const b=visibleBounds(2),step=zoom<3?3:zoom<4?2:1;ctx.save();ctx.lineCap="round";for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){const v=trail[idx(x,y)];if(v<12)continue;const s=worldToScreen(x+.5,y+.5),z=cameraScale();ctx.fillStyle=v>80?"rgba(118,88,55,.52)":`rgba(135,103,67,${Math.min(.38,v/230)})`;ctx.beginPath();ctx.ellipse(s.x,s.y,Math.max(1.4,z*.48),Math.max(1,z*.22),hash(x,y,9)*Math.PI,0,Math.PI*2);ctx.fill()}ctx.restore()}
 function drawWater(){const b=visibleBounds(2),step=zoom<3?5:zoom<5?3:2;ctx.save();ctx.globalAlpha=.22;ctx.strokeStyle="#d7eff1";ctx.lineWidth=Math.max(1,cameraScale()*.10);for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){const t=terrain[idx(x,y)];if(t!==T.WATER&&t!==T.DEEP)continue;const h=hash(x,y,worldSeed+331);if(h<.58)continue;const s=worldToScreen(x+.5,y+.5),w=Math.sin(tick*.065+x*.55+y*.37)*cameraScale()*.18,len=cameraScale()*(1+h);ctx.beginPath();ctx.moveTo(s.x-len/2,s.y+w);ctx.lineTo(s.x+len/2,s.y+w);ctx.stroke()}ctx.restore()}
@@ -443,6 +549,40 @@ function closeMenu(){gameMenu.classList.add("hidden");document.querySelectorAll(
 function openMainMenu(tab){mainTab=tab;newWorldArmed=false;citizen.classList.add("hidden");brushPanel.classList.add("hidden");gameMenu.classList.remove("hidden");document.querySelectorAll(".navtab").forEach(b=>b.classList.toggle("active",b.dataset.mainTab===tab));renderMainMenu()}
 function sectionButton(id,label){return `<button class="segment ${worldSection===id?"active":""}" data-world-section="${id}" type="button">${label}</button>`}
 function powerCard(toolId,emoji,name,small="",danger=false){return `<button class="actionCard ${danger?"danger ":""}${tool===toolId?"selected":""}" data-tool-select="${toolId}" type="button"><span class="emoji">${emoji}</span><b>${name}</b>${small?`<small>${small}</small>`:""}</button>`}
+
+function rangeRow(key,title,icon,min,max,step=1,suffix=""){
+  const v=worldConfig[key];
+  return `<div class="creatorRow"><div class="creatorLabel"><span>${icon}</span><div><b>${title}</b><small id="${key}Value">${v}${suffix}</small></div></div><input data-world-range="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${v}"></div>`
+}
+function worldCreatorHtml(){
+  return `<div class="menuHero"><div class="eyebrow">World Generator</div><h3>Create Your World</h3><p>Change the world before generating it. The same settings can later be used to reset this world.</p></div>
+  <div class="menuSection">Seed</div>
+  <div class="seedRow"><input id="worldSeedInput" value="${escapeHtml(worldConfig.seed)}" placeholder="random or custom seed"><button data-action="randomize-seed" type="button">🎲 Random</button></div>
+  <div class="menuSection">Terrain</div>
+  ${rangeRow("landmass","Landmass","🌍",10,90,1,"%")}
+  ${rangeRow("water","Water Level","🌊",10,90,1,"%")}
+  ${rangeRow("forest","Forest Density","🌲",0,100,1,"%")}
+  ${rangeRow("mountains","Mountain Density","⛰️",0,100,1,"%")}
+  <div class="menuSection">Life</div>
+  ${rangeRow("wildlife","Wildlife Amount","🦌",0,100,1,"%")}
+  ${rangeRow("startPopulation","Starting People","👥",2,12,1,"")}
+  <div class="menuSection">Starting Supplies</div>
+  ${rangeRow("startingFood","Starting Food","🍎",0,60,1,"")}
+  ${rangeRow("startingWood","Starting Wood","🪵",0,40,1,"")}
+  <button class="bigAction" data-action="generate-custom-world" type="button">🌍 Generate This World</button>
+  <button class="bigAction" data-action="reset-custom-defaults" type="button">↺ Restore Generator Defaults</button>`
+}
+function worldResetHtml(){
+  return `<div class="menuHero"><div class="eyebrow">World Reset</div><h3>Restart Current World</h3><p>This regenerates the current seed with the exact customization settings that created it.</p></div>
+  <div class="civRows">
+    <div class="civRow"><span>Seed</span><span>${escapeHtml(String(lastGeneratedConfig.seed))}</span></div>
+    <div class="civRow"><span>Land / water</span><span>${lastGeneratedConfig.landmass}% / ${lastGeneratedConfig.water}%</span></div>
+    <div class="civRow"><span>Forest / mountains</span><span>${lastGeneratedConfig.forest}% / ${lastGeneratedConfig.mountains}%</span></div>
+    <div class="civRow"><span>Starting population</span><span>${lastGeneratedConfig.startPopulation}</span></div>
+  </div>
+  <div class="warningBox" style="margin-top:10px">Resetting removes the current civilization, buildings, history, roads, fire, placed resources, creatures and underground mining progress. The world regenerates from the same seed and settings.</div>
+  <button class="bigAction danger" data-action="reset-current-world" type="button">${resetWorldArmed?"⚠️ Tap again to confirm reset":"↺ Reset Current World"}</button>`
+}
 function worldOverviewHtml(){
   return `<div class="menuHero"><div class="eyebrow">Current world</div><h3>${escapeHtml(settlement.name)}</h3><p>Day ${Math.floor(day)} · ${eraName()} · Seed ${worldSeed}</p></div>
   <div class="menuGrid"><div class="menuStat"><small>Population</small><b>${people.filter(p=>p.alive).length}</b></div><div class="menuStat"><small>Wild creatures</small><b>${critters.length}</b></div><div class="menuStat"><small>Buildings</small><b>${buildings.filter(b=>b.complete).length}</b></div><div class="menuStat"><small>Discoveries</small><b>${settlement.tech.size}</b></div></div>
@@ -474,11 +614,12 @@ function historyHtml(){
 function settingsHtml(){
   const row=(key,title,sub)=>`<div class="settingRow"><div><b>${title}</b><small>${sub}</small></div><button class="toggle ${settings[key]?"on":""}" data-setting="${key}" type="button" aria-label="${title}"></button></div>`;
   return `${row("labels","Citizen name labels","Show names while closely zoomed")}${row("trails","Footpaths","Show paths created by walking")}${row("dayNight","Day & night lighting","Darken the world as time cycles")}${row("effects","Weather & particles","Clouds, rain and world effects")}
-  <div class="menuSection">World management</div><button class="bigAction" data-action="center-world" type="button">⌾ Center on First Hearth</button><button class="bigAction danger" data-action="new-world" type="button">${newWorldArmed?"⚠️ Tap again — erase this world":"🌍 Create New World"}</button>${newWorldArmed?`<div class="warningBox" style="margin-top:7px">This starts a completely new procedural world and resets the current civilization.</div>`:""}`
+  <div class="menuSection">World management</div><button class="bigAction" data-action="center-world" type="button">⌾ Center on First Hearth</button><button class="bigAction" data-action="open-world-creator" type="button">🌍 Open World Creator</button><button class="bigAction danger" data-action="open-world-reset" type="button">↺ Reset Current World</button>`
 }
 function updatesHtml(){
-  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V4.1 · Underground</h3><p>A full second world layer now exists beneath the surface.</p></div>
-  <div class="updateItem"><b>V4.1 — Underground</b><small>Current</small><p>Surface/Underground toggle, caves, deep stone, underground lakes, magma, iron/gold/coal/crystal veins, mine entrances, tunneling miners and layer-aware god powers.</p></div>
+  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V4.2 · World Creator</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
+  <div class="updateItem"><b>V4.2 — World Creator</b><small>Current</small><p>Custom seeds, landmass, water level, forests, mountains, wildlife, starting population and supplies; exact-world reset using the original generation configuration.</p></div>
+  <div class="updateItem"><b>V4.1 — Underground</b><small>Previous</small><p>Surface/Underground toggle, caves, deep stone, underground lakes, magma, iron/gold/coal/crystal veins, mine entrances, tunneling miners and layer-aware god powers.</p></div>
   <div class="updateItem"><b>V4 — World Control</b><small>Previous</small><p>World, God Powers and Resources tabs; full people/village/history/settings panels; biome painting; fire and lava; iron and gold; wildlife; direct people spawning; persistent visual settings.</p></div>
   <div class="updateItem"><b>V3 — Civilization</b><small>Previous</small><p>Families, jobs, farms, stockpiles, building construction, discoveries and village growth.</p></div>
   <div class="updateItem"><b>V2.1 — Camera Fix</b><small>Foundation</small><p>Unified Retina camera transform, stable terrain edges and aligned citizens.</p></div>`
@@ -486,8 +627,8 @@ function updatesHtml(){
 function renderWorldTab(){
   menuTitle.textContent="World";menuSubtitle.textContent="People, villages, history and settings";
   menuSegments.classList.remove("hidden");
-  menuSegments.innerHTML=sectionButton("overview","Overview")+sectionButton("people","People")+sectionButton("village","Village")+sectionButton("war","War")+sectionButton("history","History")+sectionButton("settings","Settings")+sectionButton("updates","Updates");
-  const pages={overview:worldOverviewHtml,people:peopleHtml,village:villageHtml,war:warHtml,history:historyHtml,settings:settingsHtml,updates:updatesHtml};menuBody.innerHTML=(pages[worldSection]||worldOverviewHtml)()
+  menuSegments.innerHTML=sectionButton("overview","Overview")+sectionButton("creator","World Creator")+sectionButton("reset","Reset")+sectionButton("people","People")+sectionButton("village","Village")+sectionButton("war","War")+sectionButton("history","History")+sectionButton("settings","Settings")+sectionButton("updates","Updates");
+  const pages={overview:worldOverviewHtml,creator:worldCreatorHtml,reset:worldResetHtml,people:peopleHtml,village:villageHtml,war:warHtml,history:historyHtml,settings:settingsHtml,updates:updatesHtml};menuBody.innerHTML=(pages[worldSection]||worldOverviewHtml)()
 }
 function renderPowersTab(){
   menuTitle.textContent="God Powers";menuSubtitle.textContent=`Transform the ${resourceLayer==="surface"?"surface":"underground"}`;
@@ -539,17 +680,27 @@ inspectBtn.addEventListener("click",()=>{tool="inspect";closeMenu();brushPanel.c
 layerBtn.addEventListener("click",()=>{activeLayer=activeLayer==="surface"?"underground":"surface";resourceLayer=activeLayer;tool="inspect";closeMenu();brushPanel.classList.add("hidden");updateUI();showToast(activeLayer==="surface"?"Surface view":"Underground view")});
 document.getElementById("centerBtn").addEventListener("click",centerOnSettlement);
 document.querySelectorAll("[data-close]").forEach(b=>b.addEventListener("click",()=>document.getElementById(b.dataset.close).classList.add("hidden")));
-menuSegments.addEventListener("click",e=>{const w=e.target.closest("[data-world-section]");if(w){worldSection=w.dataset.worldSection;newWorldArmed=false;renderMainMenu();return}const l=e.target.closest("[data-layer-section]");if(l){resourceLayer=l.dataset.layerSection;renderMainMenu()}});
+menuSegments.addEventListener("click",e=>{const w=e.target.closest("[data-world-section]");if(w){worldSection=w.dataset.worldSection;newWorldArmed=false;resetWorldArmed=false;renderMainMenu();return}const l=e.target.closest("[data-layer-section]");if(l){resourceLayer=l.dataset.layerSection;renderMainMenu()}});
+menuBody.addEventListener("input",e=>{
+  const r=e.target.closest("[data-world-range]");if(r){const k=r.dataset.worldRange;worldConfig[k]=Number(r.value);saveWorldConfig();const label=document.getElementById(k+"Value");if(label)label.textContent=r.value+(["landmass","water","forest","mountains","wildlife"].includes(k)?"%":"");return}
+  if(e.target.id==="worldSeedInput"){worldConfig.seed=e.target.value;saveWorldConfig()}
+});
 menuBody.addEventListener("click",e=>{
   const toolBtn=e.target.closest("[data-tool-select]");if(toolBtn){chooseTool(toolBtn.dataset.toolSelect);return}
   const personBtn=e.target.closest("[data-person]");if(personBtn){const p=people.find(q=>q.id===Number(personBtn.dataset.person));if(p){closeMenu();showCitizen(p);camX=p.x;camY=p.y;clampCamera()}return}
   const settingBtn=e.target.closest("[data-setting]");if(settingBtn){const k=settingBtn.dataset.setting;settings[k]=!settings[k];saveSettings();renderMainMenu();return}
   const action=e.target.closest("[data-action]");if(!action)return;
-  if(action.dataset.action==="center-world"){centerOnSettlement();closeMenu()}
-  if(action.dataset.action==="new-world"){if(!newWorldArmed){newWorldArmed=true;renderMainMenu();showToast("Tap again to create a new world")}else{newWorldArmed=false;generate();closeMenu();showToast("New world created")}}
+  const a=action.dataset.action;
+  if(a==="center-world"){centerOnSettlement();closeMenu()}
+  if(a==="open-world-creator"){worldSection="creator";resetWorldArmed=false;renderMainMenu()}
+  if(a==="open-world-reset"){worldSection="reset";resetWorldArmed=false;renderMainMenu()}
+  if(a==="randomize-seed"){worldConfig.seed=String(rndi(100000,999999999));saveWorldConfig();renderMainMenu()}
+  if(a==="reset-custom-defaults"){worldConfig=Object.assign({},defaultWorldConfig);saveWorldConfig();renderMainMenu();showToast("Generator defaults restored")}
+  if(a==="generate-custom-world"){const seedInput=document.getElementById("worldSeedInput");if(seedInput)worldConfig.seed=seedInput.value;worldConfig=normalizeWorldConfig(worldConfig);saveWorldConfig();generate(false);closeMenu()}
+  if(a==="reset-current-world"){if(!resetWorldArmed){resetWorldArmed=true;renderMainMenu();showToast("Tap again to confirm reset")}else{resetWorldArmed=false;resetCurrentWorld();closeMenu()}}
 });
 pauseBtn.addEventListener("click",()=>{paused=!paused;updateUI()});speedBtn.addEventListener("click",()=>{speed=speed===1?2:speed===2?5:1;updateUI()});window.addEventListener("resize",resizeCanvas);window.addEventListener("orientationchange",()=>setTimeout(resizeCanvas,120));
-generate();resizeCanvas();
+generate(false);resizeCanvas();
 function frame(now){if(now-lastSim>=75){simulate();lastSim=now}render();requestAnimationFrame(frame)}requestAnimationFrame(frame);
 setTimeout(()=>document.getElementById("splash").classList.add("hide"),650);refreshToolChip();
 if("serviceWorker" in navigator)navigator.serviceWorker.register("service-worker.js").catch(()=>{});

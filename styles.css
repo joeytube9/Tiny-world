@@ -271,3 +271,25 @@ button:focus-visible{outline:2px solid #9add90;outline-offset:2px}
 .oreLegend .menuStat{min-height:65px}
 .layerNote{padding:9px 10px;margin-bottom:9px;border-radius:12px;background:rgba(173,112,60,.08);border:1px solid rgba(190,131,74,.18);font-size:10px;line-height:1.45;color:#cdb79c}
 @media(max-width:390px){.layerbtn{top:calc(env(safe-area-inset-top) + 57px)}}
+
+
+/* V4.2 World Creator */
+.creatorRow{
+  padding:10px 11px;margin-bottom:7px;border-radius:14px;
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07)
+}
+.creatorLabel{display:flex;align-items:center;gap:9px;margin-bottom:8px}
+.creatorLabel>span{font-size:20px;width:26px;text-align:center}
+.creatorLabel>div{display:flex;flex:1;align-items:center;justify-content:space-between;gap:8px}
+.creatorLabel b{font-size:12px}.creatorLabel small{font-size:11px;color:#d6c08f;font-weight:800}
+.creatorRow input[type="range"]{
+  width:100%;height:28px;margin:0;accent-color:#78b969;
+  background:transparent
+}
+.seedRow{display:flex;gap:7px;margin-bottom:10px}
+.seedRow input{
+  flex:1;min-width:0;min-height:44px;border-radius:12px;padding:0 11px;
+  color:#eef4f3;background:rgba(255,255,255,.05);
+  border:1px solid rgba(255,255,255,.10);font-size:13px
+}
+.seedRow button{min-height:44px;padding:0 11px;border-radius:12px;font-size:11px;font-weight:750}

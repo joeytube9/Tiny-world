@@ -1,36 +1,32 @@
-Tiny World V4.1 — THE UNDERGROUND UPDATE
+Tiny World V4.2 — WORLD CREATOR
 
-NEW SECOND WORLD LAYER
-- Surface / Underground toggle keeps the exact same camera position and zoom.
-- Underground is a real separate simulation layer, not a visual filter.
-- Procedural dirt, stone, deep stone, caves, underground water and magma.
-- Ore now exists primarily underground as visible veins.
-- Iron veins are large rust-red metallic clusters.
-- Gold veins are bright yellow deposits.
-- Coal seams and rare crystal deposits added.
-- Underground Resources page has live resource totals.
-- Underground God Powers: Cave, Fill Stone, Water, Magma, Iron, Gold, Coal, Crystal, Reveal.
+NEW WORLD CUSTOMIZATION
+- Custom world seed (number or text).
+- Random seed button.
+- Landmass amount.
+- Water level.
+- Forest density.
+- Mountain density.
+- Wildlife amount.
+- Starting population from 2–12 people.
+- Starting food.
+- Starting wood.
+- Generator settings persist on the iPhone.
 
-REAL MINING
-- Civilization can construct Mine Entrances after Stoneworking.
-- Completing a mine discovers Mining.
-- Mine entrances line up between Surface and Underground.
-- Miners physically walk to the mine entrance.
-- They descend into the underground layer.
-- They carve tunnels through rock while moving.
-- They extract stone, iron, gold and coal.
-- They haul resources back to the shaft, return to the surface, and deliver them to the settlement.
-- Underground miners can be watched live by switching layers.
+WORLD RESET
+- Dedicated Reset page under World.
+- Reset regenerates the current world from the same seed and the exact settings that originally created it.
+- Reset removes current history, buildings, civilization progress, placed resources, creatures, roads, fire/lava changes and underground mining changes.
+- Two-tap confirmation prevents accidental resets.
 
-V4 + V3 SYSTEMS RETAINED
-- World / God Powers / Resources GUI
-- Families, jobs, villages, farms, construction
-- Wildlife
-- Fire/lava on the surface
-- Camera/Retina fix
+WORLD MENU
+World > World Creator
+World > Reset
+
+All V4.1 Underground systems, V4 GUI systems, V3 civilization simulation, and the camera fix remain.
 
 DEPLOY
-Still a flat build. Replace the files in your GitHub tiny-world repo and commit.
+Still a flat build. Replace the files in your GitHub repository and commit.
 
 Cloudflare deploy command remains:
 npx wrangler deploy --assets . --compatibility-date 2026-09-08
