@@ -10,7 +10,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="styles.css">
-<title>Tiny World</title>
+<title>Tiny World V4</title>
 </head>
 <body>
 <div id="app">
@@ -21,32 +21,37 @@
     <div class="pill"><span>☀️</span><b id="day">1</b></div>
     <div class="pill era"><span>🏕</span><b id="era">Primitive</b></div>
     <div class="topspacer"></div>
-    <button id="centerBtn" class="iconbtn" type="button" aria-label="Center on settlement">⌾</button>
-    <button id="historyBtn" class="iconbtn" type="button" aria-label="World history">📜</button>
+    <button id="centerBtn" class="iconbtn" type="button" aria-label="Center settlement">⌾</button>
+    <button id="inspectBtn" class="iconbtn active" type="button" aria-label="Inspect citizens">👁</button>
     <button id="pauseBtn" class="iconbtn" type="button" aria-label="Pause">⏸</button>
     <button id="speedBtn" class="speedbtn" type="button">×1</button>
   </div>
 
   <div id="status">Inspect · drag map · pinch to zoom</div>
 
-  <div id="dock" class="dock">
-    <button class="tool active" data-tool="inspect"><span>👁</span><small>Inspect</small></button>
-    <button class="tool" data-tool="land"><span>🌱</span><small>Land</small></button>
-    <button class="tool" data-tool="water"><span>🌊</span><small>Water</small></button>
-    <button class="tool" data-tool="forest"><span>🌲</span><small>Forest</small></button>
-    <button class="tool" data-tool="food"><span>🍎</span><small>Food</small></button>
-    <button class="tool" data-tool="rain"><span>🌧</span><small>Rain</small></button>
-    <button class="tool" data-tool="heal"><span>✨</span><small>Heal</small></button>
-    <button class="tool danger" data-tool="lightning"><span>⚡</span><small>Strike</small></button>
-    <button id="brushBtn" class="tool" type="button"><span>🖌</span><small id="brushLabel">12</small></button>
+  <div id="toolChip" class="toolchip">
+    <span id="toolIcon">👁</span>
+    <div><b id="toolName">Inspect</b><small id="toolHint">Tap a person</small></div>
+    <button id="brushBtn" type="button"><span>🖌</span><b id="brushLabel">12</b></button>
   </div>
 
-  <section id="history" class="drawer right hidden">
-    <div class="drawerhead">
-      <div><b>World History</b><div class="muted">Chronicle of the simulation</div></div>
-      <button class="close" data-close="history" type="button">✕</button>
+  <nav id="mainNav" class="mainnav" aria-label="Game controls">
+    <button class="navtab" data-main-tab="world" type="button"><span>🌍</span><b>World</b></button>
+    <button class="navtab" data-main-tab="powers" type="button"><span>✨</span><b>God Powers</b></button>
+    <button class="navtab" data-main-tab="resources" type="button"><span>🧰</span><b>Resources</b></button>
+  </nav>
+
+  <section id="gameMenu" class="gamesheet hidden">
+    <div class="sheetHandle"></div>
+    <div class="sheetHead">
+      <div>
+        <b id="menuTitle">World</b>
+        <div id="menuSubtitle" class="muted">Manage Tiny World</div>
+      </div>
+      <button id="menuClose" class="close" type="button">✕</button>
     </div>
-    <div id="historyList" class="scroll"></div>
+    <div id="menuSegments" class="segments hidden"></div>
+    <div id="menuBody" class="menuBody"></div>
   </section>
 
   <section id="citizen" class="drawer left hidden">
@@ -64,17 +69,22 @@
     <button class="brush" data-size="40" type="button">Huge</button>
   </section>
 
+  <!-- Hidden compatibility containers used by the simulation's history/civilization renderers. -->
+  <section id="history" class="hidden legacy"><div id="historyList"></div></section>
+  <section id="civilization" class="hidden legacy">
+    <b id="settlementName"></b><div id="settlementEra"></div><div id="civBody"></div>
+  </section>
+
   <div id="toast" class="toast hidden" aria-live="polite"></div>
 
   <div id="splash">
     <div class="logo">
       <div class="island">🌍</div>
       <h1>Tiny World</h1>
-      <p>A pocket civilization.</p>
+      <p>V4 · World Control</p>
     </div>
   </div>
 </div>
-
 <script src="game.js"></script>
 </body>
 </html>

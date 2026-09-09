@@ -1,28 +1,48 @@
-Tiny World — V2.1 FLAT BUILD
+Tiny World V4 — WORLD CONTROL GUI
 
-This version has NO folders.
+MAIN GUI
+- World tab
+  - Overview
+  - People list / citizen inspection
+  - Village information
+  - Future warfare information
+  - Complete World History
+  - Settings
+  - New World
+  - Update logs
 
-Upload all of these files directly to the root of your GitHub repository:
-- index.html
-- styles.css
-- game.js
-- manifest.webmanifest
-- service-worker.js
-- apple-touch-icon.png
-- icon-192.png
-- icon-512.png
-- README.txt
+- God Powers tab
+  - Raise land / water / mountain
+  - Grassland / desert / snow
+  - Rain / drought / lightning
+  - Fire / lava
+  - Heal / bless
+  - Food / trees / stone / iron / gold
 
-CLOUDFLARE SETTINGS
-Build command: None
-Deploy command: npx wrangler deploy --assets .
-Root directory: /
+- Resources tab
+  - Biomes
+  - Stone / iron / gold deposits
+  - Trees / wild food
+  - Deer / sheep / wolves
+  - Spawn human / couple / family
+  - Live world resource counts
 
-The period after --assets is required.
+SIMULATION ADDITIONS
+- Iron and gold are real mineable resources.
+- Miners can carry stone, iron or gold back to the settlement.
+- Deer, sheep and wolves are living world entities.
+- Wolves can pursue deer/sheep.
+- Fire burns land and can hurt citizens.
+- Lava is persistent terrain and dangerous.
+- Visual settings persist on the device.
+- The V2.1 unified camera/Retina fix remains in place.
+- V3 families, jobs, farming, construction and village growth remain.
 
-This build includes the V2.1 camera fixes:
-- terrain no longer stretches/morphs near map edges
-- people/buildings/terrain share the same camera transform
-- iPhone Retina scaling is handled correctly
-- pinch zoom stays aligned
-- camera is clamped correctly
+DEPLOY
+This is still a completely flat build.
+
+Replace your GitHub repository files with the files from this ZIP and commit.
+Cloudflare should redeploy automatically.
+
+Keep your Cloudflare deploy command:
+npx wrangler deploy --assets . --compatibility-date 2026-09-08
