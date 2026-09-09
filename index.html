@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#13242b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tiny World">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="styles.css">
+<title>Tiny World</title>
+</head>
+<body>
+<div id="app">
+  <canvas id="world" aria-label="Tiny World simulation"></canvas>
+
+  <div class="topbar">
+    <div class="pill"><span>👥</span><b id="pop">2</b></div>
+    <div class="pill"><span>☀️</span><b id="day">1</b></div>
+    <div class="pill era"><span>🏕</span><b id="era">Primitive</b></div>
+    <div class="topspacer"></div>
+    <button id="centerBtn" class="iconbtn" type="button" aria-label="Center on settlement">⌾</button>
+    <button id="historyBtn" class="iconbtn" type="button" aria-label="World history">📜</button>
+    <button id="pauseBtn" class="iconbtn" type="button" aria-label="Pause">⏸</button>
+    <button id="speedBtn" class="speedbtn" type="button">×1</button>
+  </div>
+
+  <div id="status">Inspect · drag map · pinch to zoom</div>
+
+  <div id="dock" class="dock">
+    <button class="tool active" data-tool="inspect"><span>👁</span><small>Inspect</small></button>
+    <button class="tool" data-tool="land"><span>🌱</span><small>Land</small></button>
+    <button class="tool" data-tool="water"><span>🌊</span><small>Water</small></button>
+    <button class="tool" data-tool="forest"><span>🌲</span><small>Forest</small></button>
+    <button class="tool" data-tool="food"><span>🍎</span><small>Food</small></button>
+    <button class="tool" data-tool="rain"><span>🌧</span><small>Rain</small></button>
+    <button class="tool" data-tool="heal"><span>✨</span><small>Heal</small></button>
+    <button class="tool danger" data-tool="lightning"><span>⚡</span><small>Strike</small></button>
+    <button id="brushBtn" class="tool" type="button"><span>🖌</span><small id="brushLabel">12</small></button>
+  </div>
+
+  <section id="history" class="drawer right hidden">
+    <div class="drawerhead">
+      <div><b>World History</b><div class="muted">Chronicle of the simulation</div></div>
+      <button class="close" data-close="history" type="button">✕</button>
+    </div>
+    <div id="historyList" class="scroll"></div>
+  </section>
+
+  <section id="citizen" class="drawer left hidden">
+    <div class="drawerhead">
+      <div><b id="citizenName">Citizen</b><div id="citizenSub" class="muted"></div></div>
+      <button class="close" data-close="citizen" type="button">✕</button>
+    </div>
+    <div id="citizenBody"></div>
+  </section>
+
+  <section id="brushPanel" class="floatpanel hidden">
+    <button class="brush" data-size="5" type="button">Small</button>
+    <button class="brush active" data-size="12" type="button">Medium</button>
+    <button class="brush" data-size="24" type="button">Large</button>
+    <button class="brush" data-size="40" type="button">Huge</button>
+  </section>
+
+  <div id="toast" class="toast hidden" aria-live="polite"></div>
+
+  <div id="splash">
+    <div class="logo">
+      <div class="island">🌍</div>
+      <h1>Tiny World</h1>
+      <p>A pocket civilization.</p>
+    </div>
+  </div>
+</div>
+
+<script src="game.js"></script>
+</body>
+</html>
