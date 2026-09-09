@@ -10,7 +10,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="styles.css">
-<title>Tiny World V4</title>
+<title>Tiny World V5</title>
 </head>
 <body>
 <div id="app">
@@ -30,6 +30,11 @@
   <button id="layerBtn" class="layerbtn surface" type="button" aria-label="Switch world layer">
     <span id="layerIcon">🌿</span><b id="layerLabel">Surface</b><small>⇅</small>
   </button>
+
+  <section id="miniMapPanel" class="minimapPanel" aria-label="World atlas">
+    <div class="minimapHead"><b>Atlas</b><small id="miniMapMode">Surface</small></div>
+    <canvas id="miniMap" width="168" height="116"></canvas>
+  </section>
 
   <div id="status">Inspect · drag map · pinch to zoom</div>
 
@@ -85,7 +90,7 @@
     <div class="logo">
       <div class="island">🌍</div>
       <h1>Tiny World</h1>
-      <p>V4.1 · Underground</p>
+      <p>V5 · Visual Overhaul</p>
     </div>
   </div>
 </div>

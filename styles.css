@@ -293,3 +293,156 @@ button:focus-visible{outline:2px solid #9add90;outline-offset:2px}
   border:1px solid rgba(255,255,255,.10);font-size:13px
 }
 .seedRow button{min-height:44px;padding:0 11px;border-radius:12px;font-size:11px;font-weight:750}
+
+
+/* ===================== V5 Visual Overhaul ===================== */
+:root{
+  --panel:rgba(9,17,23,.76);
+  --panel2:rgba(20,31,40,.88);
+  --line:rgba(255,255,255,.10);
+  --line2:rgba(255,255,255,.18);
+  --text:#f5f8f7;
+  --muted:#a4b7bf;
+}
+html,body{background:radial-gradient(circle at top,#284f60 0%,#10222b 56%,#09141a 100%)}
+button{
+  border:1px solid rgba(255,255,255,.10);
+  background:linear-gradient(180deg,rgba(30,44,53,.92),rgba(18,29,36,.92));
+  box-shadow:0 8px 22px rgba(0,0,0,.14), inset 0 1px 0 rgba(255,255,255,.06);
+}
+button.active{
+  background:linear-gradient(180deg,#6aa054,#4f7f42);
+  border-color:rgba(177,235,151,.55);
+  box-shadow:0 10px 26px rgba(70,118,55,.34), inset 0 1px 0 rgba(255,255,255,.18);
+}
+#app{
+  background:
+    radial-gradient(circle at 22% 8%,rgba(130,196,214,.08),transparent 26%),
+    radial-gradient(circle at 78% 12%,rgba(133,211,134,.07),transparent 24%),
+    linear-gradient(180deg,#1b3948 0%,#10222b 55%,#0a171d 100%);
+}
+.topbar{top:calc(env(safe-area-inset-top) + 9px);gap:7px}
+.pill,.topbar button{
+  background:linear-gradient(180deg,rgba(20,34,43,.80),rgba(10,20,26,.68));
+  border:1px solid rgba(255,255,255,.11);
+  box-shadow:0 10px 22px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.07);
+}
+.pill{border-radius:15px;padding:0 12px}
+.topbar .era{
+  background:linear-gradient(180deg,rgba(51,75,46,.78),rgba(22,36,24,.76));
+  border-color:rgba(154,216,126,.25);
+}
+.iconbtn,.speedbtn{border-radius:15px}
+.layerbtn{
+  top:calc(env(safe-area-inset-top) + 64px);
+  right:calc(env(safe-area-inset-right) + 10px);
+  min-height:42px;
+  padding:0 12px;
+  border-radius:15px;
+  background:linear-gradient(180deg,rgba(20,47,40,.92),rgba(8,20,18,.92));
+  border:1px solid rgba(136,214,149,.24);
+  box-shadow:0 10px 24px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.07);
+}
+.layerbtn.underground{
+  background:linear-gradient(180deg,rgba(66,46,35,.92),rgba(30,21,18,.92));
+  border-color:rgba(214,171,110,.24);
+}
+.minimapPanel{
+  position:absolute;z-index:30;top:calc(env(safe-area-inset-top) + 112px);
+  right:calc(env(safe-area-inset-right) + 10px);width:178px;
+  padding:8px 8px 10px;border-radius:18px;
+  background:linear-gradient(180deg,rgba(12,22,29,.80),rgba(6,13,18,.82));
+  border:1px solid rgba(255,255,255,.10);
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  box-shadow:0 14px 32px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.06)
+}
+.minimapHead{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;padding:0 2px}
+.minimapHead b{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#dfe8ea}
+.minimapHead small{font-size:10px;color:#a7bac2;font-weight:700}
+#miniMap{
+  display:block;width:100%;height:116px;border-radius:13px;background:#0f1920;
+  border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 0 0 1px rgba(255,255,255,.02);touch-action:none
+}
+#status{
+  bottom:calc(env(safe-area-inset-bottom) + 140px);padding:8px 11px;border-radius:13px;
+  background:linear-gradient(180deg,rgba(11,19,25,.74),rgba(11,19,25,.58));
+  border:1px solid rgba(255,255,255,.08);box-shadow:0 10px 20px rgba(0,0,0,.15);color:#d7e3e5
+}
+.toolchip{
+  bottom:calc(env(safe-area-inset-bottom) + 82px);min-height:56px;padding:7px 8px 7px 11px;
+  border-radius:18px;background:linear-gradient(180deg,rgba(14,26,33,.90),rgba(9,19,24,.84));
+  border:1px solid rgba(255,255,255,.11);box-shadow:0 14px 28px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.05)
+}
+.toolchip>span{font-size:24px}
+.toolchip button{border-radius:12px;background:linear-gradient(180deg,rgba(40,58,68,.95),rgba(23,36,44,.95))}
+.mainnav{
+  height:69px;padding:7px;border-radius:23px;
+  background:linear-gradient(180deg,rgba(12,22,28,.95),rgba(8,14,19,.97));
+  border:1px solid rgba(255,255,255,.10);
+  box-shadow:0 16px 40px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.05)
+}
+.navtab{border-radius:16px;transition:transform .12s ease,background .12s ease,box-shadow .12s ease}
+.navtab.active{
+  background:linear-gradient(180deg,rgba(107,161,85,.30),rgba(65,108,56,.20));
+  border:1px solid rgba(152,229,138,.30);box-shadow:inset 0 1px 0 rgba(255,255,255,.10)
+}
+.gamesheet{
+  background:
+    radial-gradient(circle at top left,rgba(104,154,117,.08),transparent 26%),
+    radial-gradient(circle at top right,rgba(95,155,184,.08),transparent 28%),
+    linear-gradient(180deg,rgba(23,38,46,.985),rgba(10,18,23,.988));
+  border-top:1px solid rgba(255,255,255,.14);
+  box-shadow:0 -26px 55px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.05)
+}
+.sheetHandle{width:48px;height:5px;background:rgba(255,255,255,.20)}
+.menuHero{
+  border-radius:19px;
+  background:
+    radial-gradient(circle at 0% 0%,rgba(122,191,129,.14),transparent 32%),
+    radial-gradient(circle at 100% 0%,rgba(103,170,196,.11),transparent 30%),
+    linear-gradient(135deg,rgba(255,255,255,.05),rgba(255,255,255,.02));
+  border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)
+}
+.menuHero h3{font-size:24px}
+.menuStat,.listCard,.settingRow,.creatorRow,.actionCard,.warningBox{
+  border-radius:15px;background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.03));
+  border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.03)
+}
+.menuStat{min-height:83px}
+.actionCard{min-height:92px;padding:10px 6px}
+.actionCard .emoji{font-size:29px;filter:drop-shadow(0 4px 8px rgba(0,0,0,.22))}
+.actionCard.selected{
+  background:linear-gradient(180deg,rgba(107,161,85,.34),rgba(51,86,45,.22));
+  border-color:rgba(146,222,131,.38)
+}
+.actionCard.danger.selected{
+  background:linear-gradient(180deg,rgba(180,92,69,.36),rgba(108,48,34,.22));
+  border-color:rgba(216,130,108,.42)
+}
+.segment{
+  min-height:36px;padding:0 12px;background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.03));
+  border:1px solid rgba(255,255,255,.06)
+}
+.segment.active{background:linear-gradient(180deg,#5f8f50,#476f3e);border-color:rgba(164,233,145,.32)}
+.bigAction{border-radius:15px;background:linear-gradient(180deg,rgba(61,90,103,.94),rgba(30,46,55,.94))}
+.bigAction.danger{background:linear-gradient(180deg,#7c4d44,#5d392f)}
+.drawer{
+  background:radial-gradient(circle at top left,rgba(90,150,175,.08),transparent 26%),linear-gradient(180deg,rgba(18,30,38,.95),rgba(9,16,21,.95));
+  border:1px solid rgba(255,255,255,.10)
+}
+.creatorRow input[type="range"]{accent-color:#8fd272}
+.seedRow input{background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.035))}
+#splash{
+  background:
+    radial-gradient(circle at 50% 34%,rgba(110,191,211,.18),transparent 24%),
+    radial-gradient(circle at 50% 42%,#244756,#12242d 58%,#09141a 100%)
+}
+.logo .island{animation:float 2.6s ease-in-out infinite;filter:drop-shadow(0 14px 22px rgba(0,0,0,.38))}
+.logo h1{text-shadow:0 4px 14px rgba(0,0,0,.25)}
+@media(max-width:420px){.minimapPanel{width:166px}#miniMap{height:104px}}
+@media(max-width:380px){.minimapPanel{width:154px;padding:7px}#miniMap{height:96px}#status{bottom:calc(env(safe-area-inset-bottom) + 136px)}}
+@media(orientation:landscape) and (max-height:500px){
+  .minimapPanel{top:calc(env(safe-area-inset-top) + 59px);width:146px}
+  #miniMap{height:82px}
+  #status{display:none}
+}
