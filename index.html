@@ -10,33 +10,43 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="styles.css">
-<title>Tiny World V5</title>
+<title>Tiny World V5.1</title>
 </head>
 <body>
 <div id="app">
   <canvas id="world" aria-label="Tiny World simulation"></canvas>
 
   <div class="topbar">
-    <div class="pill"><span>👥</span><b id="pop">2</b></div>
-    <div class="pill"><span>☀️</span><b id="day">1</b></div>
-    <div class="pill era"><span>🏕</span><b id="era">Primitive</b></div>
+    <div class="worldhud">
+      <div class="hudstat"><span>👥</span><b id="pop">2</b></div>
+      <div class="hudstat"><span>☀️</span><b id="day">1</b></div>
+      <div class="hudera"><span>🏕</span><b id="era">Primitive</b></div>
+    </div>
     <div class="topspacer"></div>
-    <button id="centerBtn" class="iconbtn" type="button" aria-label="Center settlement">⌾</button>
-    <button id="inspectBtn" class="iconbtn active" type="button" aria-label="Inspect citizens">👁</button>
-    <button id="pauseBtn" class="iconbtn" type="button" aria-label="Pause">⏸</button>
-    <button id="speedBtn" class="speedbtn" type="button">×1</button>
+    <div class="hudcontrols">
+      <button id="centerBtn" class="iconbtn" type="button" aria-label="Center settlement">⌾</button>
+      <button id="inspectBtn" class="iconbtn active" type="button" aria-label="Inspect citizens">👁</button>
+      <button id="pauseBtn" class="iconbtn" type="button" aria-label="Pause">⏸</button>
+      <button id="speedBtn" class="speedbtn" type="button">×1</button>
+    </div>
   </div>
 
   <button id="layerBtn" class="layerbtn surface" type="button" aria-label="Switch world layer">
     <span id="layerIcon">🌿</span><b id="layerLabel">Surface</b><small>⇅</small>
   </button>
+  <button id="uiToggleBtn" class="uiToggleBtn" type="button" aria-label="Hide interface">◫</button>
 
-  <section id="miniMapPanel" class="minimapPanel" aria-label="World atlas">
-    <div class="minimapHead"><b>Atlas</b><small id="miniMapMode">Surface</small></div>
-    <canvas id="miniMap" width="168" height="116"></canvas>
+  <section id="miniMapPanel" class="minimapPanel compact" aria-label="World atlas">
+    <button id="miniMapToggle" class="minimapToggle" type="button" aria-label="Expand or collapse atlas">
+      <span>🗺️</span><b>Atlas</b><small>⌄</small>
+    </button>
+    <div class="minimapContent">
+      <div class="minimapHead"><b>World Atlas</b><small id="miniMapMode">Surface</small></div>
+      <canvas id="miniMap" width="168" height="116"></canvas>
+    </div>
   </section>
 
-  <div id="status">Inspect · drag map · pinch to zoom</div>
+  <div id="status" class="srStatus">Inspect · drag map · pinch to zoom</div>
 
   <div id="toolChip" class="toolchip">
     <span id="toolIcon">👁</span>
@@ -90,7 +100,7 @@
     <div class="logo">
       <div class="island">🌍</div>
       <h1>Tiny World</h1>
-      <p>V5 · Visual Overhaul</p>
+      <p>V5.1 · Living World</p>
     </div>
   </div>
 </div>

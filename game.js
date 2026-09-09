@@ -11,7 +11,7 @@ const status=document.getElementById("status"),pauseBtn=document.getElementById(
 const gameMenu=document.getElementById("gameMenu"),menuTitle=document.getElementById("menuTitle"),menuSubtitle=document.getElementById("menuSubtitle"),menuBody=document.getElementById("menuBody"),menuSegments=document.getElementById("menuSegments");
 const inspectBtn=document.getElementById("inspectBtn"),toolIcon=document.getElementById("toolIcon"),toolName=document.getElementById("toolName"),toolHint=document.getElementById("toolHint");
 const layerBtn=document.getElementById("layerBtn"),layerIcon=document.getElementById("layerIcon"),layerLabel=document.getElementById("layerLabel");
-const miniMap=document.getElementById("miniMap"),miniMapMode=document.getElementById("miniMapMode"),mmctx=miniMap.getContext("2d",{alpha:false});
+const miniMap=document.getElementById("miniMap"),miniMapMode=document.getElementById("miniMapMode"),mmctx=miniMap.getContext("2d",{alpha:false}),miniMapPanel=document.getElementById("miniMapPanel"),miniMapToggle=document.getElementById("miniMapToggle"),uiToggleBtn=document.getElementById("uiToggleBtn"),appEl=document.getElementById("app");
 
 const WORLD_W=420,WORLD_H=300,N=WORLD_W*WORLD_H;
 const T={DEEP:0,WATER:1,SAND:2,GRASS:3,FOREST:4,MOUNTAIN:5,SNOW:6,LAVA:7};
@@ -252,7 +252,7 @@ function paint(cx,cy,r,type,record=true){
   }
 }
 
-function makePerson(name,x,y,sex,age,parents=[]){return{id:nextPersonId++,name,x,y,px:x,py:y,sex,age,parents:[...parents],health:100,hunger:rnd(6,16),thirst:rnd(6,14),energy:rnd(80,100),job:age<14?"Child":"Gatherer",goal:"Explore",mood:"Curious",partner:null,children:[],memory:[parents.length?"Born in the settlement":"Entered the Tiny World"],alive:true,dir:1,phase:rnd(0,6.28),skin:rndi(0,3),shirt:rndi(0,5),hair:rndi(0,4),carryType:null,carryAmount:0,lastBirthDay:-999,workTimer:0,layer:"surface"}}
+function makePerson(name,x,y,sex,age,parents=[]){return{id:nextPersonId++,name,x,y,px:x,py:y,sex,age,parents:[...parents],health:100,hunger:rnd(6,16),thirst:rnd(6,14),energy:rnd(80,100),job:age<14?"Child":"Gatherer",goal:"Explore",mood:"Curious",partner:null,children:[],memory:[parents.length?"Born in the settlement":"Entered the Tiny World"],alive:true,dir:1,phase:rnd(0,6.28),skin:rndi(0,3),shirt:rndi(0,5),hair:rndi(0,4),carryType:null,carryAmount:0,lastBirthDay:-999,workTimer:0,layer:"surface",traits:{bravery:rnd(.25,.9),work:rnd(.25,.9),social:rnd(.25,.9),curiosity:rnd(.25,.9),kindness:rnd(.25,.9)},socialNeed:rnd(5,25),stress:rnd(0,6),longGoal:"Build a stable life",decisionReason:"Learning the world",lastDecision:0,relations:{}}}
 function makeCritter(type,x,y){
   const c={id:nextCritterId++,type,x,y,px:x,py:y,dir:1,phase:rnd(0,6.28),alive:true};
   critters.push(c);return c
@@ -305,7 +305,67 @@ function moveToward(p,t){if(!t){wander(p);return}const dx=Math.sign(t.x-p.x),dy=
 function nearWater(p){for(let y=p.y-2;y<=p.y+2;y++)for(let x=p.x-2;x<=p.x+2;x++){if(x<0||y<0||x>=WORLD_W||y>=WORLD_H)continue;const t=terrain[idx(x,y)];if(t===T.WATER||t===T.DEEP)return true}return false}
 function atTarget(p,t,r=1.4){return t&&Math.hypot(p.x-t.x,p.y-t.y)<=r}
 
-function assignJobs(){const adults=people.filter(p=>p.alive&&p.age>=14&&p.layer!=="underground");const pending=buildings.filter(b=>!b.complete);const farms=buildingsOf("farm");let farmerSlots=hasTech("Agriculture")?Math.max(0,Math.min(farms.length*2,Math.ceil(adults.length*.28))):0;let builders=pending.length?Math.max(1,Math.ceil(adults.length*.15)):0;let miners=hasTech("Stoneworking")&&(settlement.stone<14||(settlement.iron||0)<8||(settlement.gold||0)<3)?Math.max(1,Math.ceil(adults.length*.16)):0;let woodNeeded=settlement.wood<18?Math.max(1,Math.ceil(adults.length*.25)):Math.max(0,Math.ceil(adults.length*.12));let foodNeeded=settlement.food<20?Math.max(1,Math.ceil(adults.length*.30)):Math.max(1,Math.ceil(adults.length*.16));for(const p of adults){if(builders>0){p.job="Builder";builders--;continue}if(farmerSlots>0){p.job="Farmer";farmerSlots--;continue}if(miners>0){p.job="Miner";miners--;continue}if(woodNeeded>0){p.job="Woodcutter";woodNeeded--;continue}if(foodNeeded>0){p.job="Gatherer";foodNeeded--;continue}p.job=Math.random()<.45?"Hauler":"Gatherer"}}
+
+function aiTraitLabel(p){
+  if(!p.traits)return "Balanced";
+  const pairs=[["Brave",p.traits.bravery],["Diligent",p.traits.work],["Social",p.traits.social],["Curious",p.traits.curiosity],["Caring",p.traits.kindness]].sort((a,b)=>b[1]-a[1]);
+  return pairs[0][1]>.70?pairs[0][0]:"Balanced"
+}
+function aiChooseLongGoal(p){
+  if(p.age<14)return "Grow up safely";
+  const t=p.traits||{};
+  if((t.curiosity||0)>.72)return "Explore the world";
+  if((t.work||0)>.72)return "Master a useful trade";
+  if((t.social||0)>.72)return "Build strong relationships";
+  if((t.kindness||0)>.72)return "Care for family and neighbors";
+  return "Help First Hearth prosper"
+}
+function aiDangerNear(p){
+  let danger=0;
+  const pi=idx(clamp(Math.round(p.x),0,WORLD_W-1),clamp(Math.round(p.y),0,WORLD_H-1));
+  if(p.layer!=="underground"&&(terrain[pi]===T.LAVA||burn[pi]>100))danger+=3;
+  if(p.layer==="underground"&&underground[pi]===U.MAGMA)danger+=4;
+  for(const c of critters)if(c.alive&&c.type==="wolf"&&Math.hypot(c.x-p.x,c.y-p.y)<5)danger+=1;
+  return danger
+}
+function aiUpdateMind(p){
+  if(!p.alive)return;
+  p.socialNeed=clamp((p.socialNeed||0)+.006,0,100);
+  p.stress=clamp((p.stress||0)+(p.hunger>70?.012:0)+(p.thirst>70?.014:0)+(p.health<55?.018:0)-.003,0,100);
+  if(!p.longGoal||tick-p.lastDecision>900){p.longGoal=aiChooseLongGoal(p)}
+  const danger=aiDangerNear(p);
+  if(danger>0){p.mood="Alarmed";p.decisionReason="Avoiding nearby danger";p.stress=clamp(p.stress+.18,0,100)}
+  else if(p.hunger>70){p.decisionReason="Food is becoming urgent"}
+  else if(p.thirst>70){p.decisionReason="Water is becoming urgent"}
+  else if(p.energy<28){p.decisionReason="Needs rest"}
+  else if(p.socialNeed>72&&(p.traits?.social||0)>.55){p.decisionReason="Wants company"}
+  else{p.decisionReason=`Working toward: ${p.longGoal}`}
+  if(tick-p.lastDecision>240){p.lastDecision=tick}
+}
+function aiSocialize(p){
+  if(p.age<10||p.socialNeed<72||p.layer==="underground")return false;
+  let friend=null,bd=8;
+  for(const q of people){if(!q.alive||q.id===p.id||q.layer==="underground")continue;const d=Math.hypot(q.x-p.x,q.y-p.y);if(d<bd){bd=d;friend=q}}
+  if(!friend)return false;
+  p.goal=`Talk with ${friend.name}`;
+  if(bd>1.6){moveToward(p,friend);return true}
+  p.socialNeed=clamp(p.socialNeed-32,0,100);friend.socialNeed=clamp((friend.socialNeed||0)-18,0,100);
+  p.relations[friend.id]=clamp(Number(p.relations[friend.id]||0)+1,-100,100);
+  friend.relations=friend.relations||{};friend.relations[p.id]=clamp(Number(friend.relations[p.id]||0)+1,-100,100);
+  p.mood="Connected";
+  if(Math.random()<.02){p.memory.unshift(`Shared time with ${friend.name}`);p.memory=p.memory.slice(0,8)}
+  return true
+}
+function aiFlee(p){
+  if(!aiDangerNear(p))return false;
+  const home=nearestBuilding(p,"hut")||nearestBuilding(p,"firepit");
+  p.goal="Escape danger";p.mood="Alarmed";
+  if(home&&Math.hypot(p.x-home.x,p.y-home.y)>2){moveToward(p,home)}
+  else wander(p);
+  return true
+}
+
+function assignJobs(){const adults=people.filter(p=>p.alive&&p.age>=14&&p.layer!=="underground").sort((a,b)=>(b.traits?.work||.5)-(a.traits?.work||.5));const pending=buildings.filter(b=>!b.complete);const farms=buildingsOf("farm");let farmerSlots=hasTech("Agriculture")?Math.max(0,Math.min(farms.length*2,Math.ceil(adults.length*.28))):0;let builders=pending.length?Math.max(1,Math.ceil(adults.length*.15)):0;let miners=hasTech("Stoneworking")&&(settlement.stone<14||(settlement.iron||0)<8||(settlement.gold||0)<3)?Math.max(1,Math.ceil(adults.length*.16)):0;let woodNeeded=settlement.wood<18?Math.max(1,Math.ceil(adults.length*.25)):Math.max(0,Math.ceil(adults.length*.12));let foodNeeded=settlement.food<20?Math.max(1,Math.ceil(adults.length*.30)):Math.max(1,Math.ceil(adults.length*.16));for(const p of adults){if(builders>0){p.job="Builder";builders--;continue}if(farmerSlots>0){p.job="Farmer";farmerSlots--;continue}if(miners>0){p.job="Miner";miners--;continue}if(woodNeeded>0){p.job="Woodcutter";woodNeeded--;continue}if(foodNeeded>0){p.job="Gatherer";foodNeeded--;continue}const t=p.traits||{};p.job=(t.social||0)>.72?"Hauler":(t.curiosity||0)>.68?"Gatherer":(t.work||0)>.72?"Woodcutter":Math.random()<.45?"Hauler":"Gatherer"}}
 function deliver(p){if(p.layer==="underground")return false;const d=dropoff(p);if(!d)return false;if(!atTarget(p,d,1.8)){p.goal=`Deliver ${p.carryType}`;moveToward(p,d);return true}if(p.carryType==="food")settlement.food+=p.carryAmount;if(p.carryType==="wood")settlement.wood+=p.carryAmount;if(p.carryType==="stone")settlement.stone+=p.carryAmount;if(p.carryType==="iron")settlement.iron+=p.carryAmount;if(p.carryType==="gold")settlement.gold+=p.carryAmount;if(p.carryType==="coal")settlement.coal=(settlement.coal||0)+p.carryAmount;p.carryType=null;p.carryAmount=0;p.goal="Work";return true}
 function findFarmWork(p){const farms=buildingsOf("farm");if(!farms.length)return null;let best=null,bd=1e9;for(const f of farms){const d=Math.abs(p.x-f.x)+Math.abs(p.y-f.y);if(d<bd&&(f.crop>=100||f.crop<15)){bd=d;best=f}}return best||farms[rndi(0,farms.length-1)]}
 function workMinerUnderground(p){
@@ -347,14 +407,16 @@ function homeCapacity(){return buildingsOf("hut").length*4+2}
 function matchPartners(){const singles=people.filter(p=>p.alive&&p.age>=18&&!p.partner);for(const p of singles){if(p.partner)continue;const q=singles.find(o=>o!==p&&!o.partner&&o.sex!==p.sex&&Math.abs(o.age-p.age)<18);if(q){p.partner=q.id;q.partner=p.id;p.memory.unshift(`Became partners with ${q.name}`);q.memory.unshift(`Became partners with ${p.name}`);addEvent(`${p.name} and ${q.name} formed a family.`,"family")}}}
 function tryBirths(){if(people.filter(p=>p.alive).length>=48)return;if(homeCapacity()<=people.filter(p=>p.alive).length)return;if(settlement.food<12)return;for(const mother of people){if(!mother.alive||mother.sex!=="F"||mother.age<18||mother.age>42||!mother.partner||day-mother.lastBirthDay<22)continue;const father=people.find(p=>p.id===mother.partner&&p.alive);if(!father)continue;if(Math.random()>.008)continue;const sex=Math.random()<.5?"F":"M",name=names[(nextPersonId+rndi(0,names.length-1))%names.length]+(nextPersonId>names.length?` ${Math.ceil(nextPersonId/names.length)}`:"");const baby=makePerson(name,mother.x,mother.y,sex,0,[mother.id,father.id]);mother.children.push(baby.id);father.children.push(baby.id);mother.lastBirthDay=day;settlement.food=Math.max(0,settlement.food-6);people.push(baby);settlement.births++;mother.memory.unshift(`Gave birth to ${name}`);father.memory.unshift(`Became parent of ${name}`);addEvent(`${name} was born to ${mother.name} and ${father.name}.`,"family");showToast(`${name} was born`);break}}
 function eatFromStores(p){if(p.hunger<58)return false;if(settlement.food>0){settlement.food--;p.hunger=clamp(p.hunger-36,0,100);p.goal="Eat";return true}return false}
-function think(p){if(!p.alive)return;p.px+=(p.x-p.px)*.23;p.py+=(p.y-p.py)*.23;p.phase+=.22;p.hunger+=p.age<6?.020:.030;p.thirst+=.043;p.energy-=p.age<6?.010:.016;p.age+=.00011;
+function think(p){if(!p.alive)return;p.px+=(p.x-p.px)*.23;p.py+=(p.y-p.py)*.23;p.phase+=.22;p.hunger+=p.age<6?.020:.030;p.thirst+=.043;p.energy-=p.age<6?.010:.016;p.age+=.00011;aiUpdateMind(p);
   const pi=idx(clamp(Math.round(p.x),0,WORLD_W-1),clamp(Math.round(p.y),0,WORLD_H-1));if(p.layer!=="underground"){if(terrain[pi]===T.LAVA)p.health-=1.6;else if(burn[pi]>110)p.health-=.30}else if(underground[pi]===U.MAGMA)p.health-=1.8;if(p.hunger>92||p.thirst>94)p.health-=.09;else if(p.health<100&&p.hunger<55&&p.thirst<55)p.health+=.014;if(p.health<=0){p.alive=false;settlement.deaths++;addEvent(`${p.name} died at age ${Math.floor(p.age)}.`,"citizen");return}
+  if(aiFlee(p))return;
   if(p.layer==="underground"&&p.job==="Miner"){p.mood="Working below";workMinerUnderground(p);return}
   if(p.thirst>60){p.goal="Find water";p.mood="Thirsty";if(nearWater(p))p.thirst=clamp(p.thirst-20,0,100);else moveToward(p,nearestTile(p,(i)=>terrain[i]===T.WATER,36));return}
   if(eatFromStores(p))return;
   if(p.energy<22){p.goal="Rest";p.mood="Tired";const home=nearestBuilding(p,"hut")||nearestBuilding(p,"firepit");if(home&&!atTarget(p,home,2))moveToward(p,home);else p.energy=clamp(p.energy+.8,0,100);return}
   if(p.age<14){p.job="Child";p.goal="Stay near home";const home=nearestBuilding(p,"hut")||nearestBuilding(p,"firepit");if(home&&Math.hypot(p.x-home.x,p.y-home.y)>7)moveToward(p,home);else if(Math.random()<.08)wander(p);return}
-  p.mood="Focused";workPerson(p);
+  if(aiSocialize(p))return;
+  p.mood=p.stress>65?"Stressed":"Focused";workPerson(p);
 }
 
 function findBuildSite(type){const cx=settlement.x,cy=settlement.y;for(let r=4;r<24;r+=2){for(let n=0;n<24;n++){const a=(n/24)*Math.PI*2+rnd(-.08,.08),x=Math.round(cx+Math.cos(a)*r),y=Math.round(cy+Math.sin(a)*r);if(!passable(x,y)||buildingAt(x,y,type==="farm"?5:4))continue;const t=terrain[idx(x,y)];if(type==="farm"&&(t!==T.GRASS&&t!==T.FOREST))continue;if(type!=="farm"&&t===T.SAND)continue;return{x,y}}}return null}
@@ -629,7 +691,7 @@ function render(){
 function eraName(){const pop=people.filter(p=>p.alive).length;if(pop>=18)return"Village";if(pop>=10)return"Hamlet";if(pop>=5)return"Growing Camp";if(buildingsOf("hut").length)return"Early Settlement";return"Primitive"}
 function jobCounts(){const c={};for(const p of people.filter(p=>p.alive)){c[p.job]=(c[p.job]||0)+1}return c}
 function renderCivilization(){if(!settlement)return;const counts=jobCounts(),complete=buildings.filter(b=>b.complete),pending=buildings.filter(b=>!b.complete);settlementNameEl.textContent=settlement.name;settlementEraEl.textContent=`${eraName()} · Day ${Math.floor(day)}`;civBody.innerHTML=`<div class="sectionTitle">Stockpile</div><div class="resourceGrid"><div class="resourceCard">🍎 Food<b>${Math.floor(settlement.food)}</b></div><div class="resourceCard">🪵 Wood<b>${Math.floor(settlement.wood)}</b></div><div class="resourceCard">🪨 Stone<b>${Math.floor(settlement.stone)}</b></div><div class="resourceCard">⛓ Iron<b>${Math.floor(settlement.iron||0)}</b></div><div class="resourceCard">🟡 Gold<b>${Math.floor(settlement.gold||0)}</b></div><div class="resourceCard">⬛ Coal<b>${Math.floor(settlement.coal||0)}</b></div></div><div class="sectionTitle">Settlement</div><div class="civRows"><div class="civRow"><span>Population</span><span>${people.filter(p=>p.alive).length} / ${homeCapacity()}</span></div><div class="civRow"><span>Buildings</span><span>${complete.length}${pending.length?` + ${pending.length} building`:''}</span></div><div class="civRow"><span>Births / deaths</span><span>${settlement.births} / ${settlement.deaths}</span></div></div><div class="sectionTitle">Jobs</div><div class="civRows">${Object.entries(counts).map(([k,v])=>`<div class="civRow"><span>${escapeHtml(k)}</span><span>${v}</span></div>`).join('')}</div><div class="sectionTitle">Discoveries</div><div class="techList">${techNames.map(t=>`<span class="tech ${hasTech(t)?'':'locked'}">${hasTech(t)?'✓ ':''}${t}</span>`).join('')}</div><div class="sectionTitle">Buildings</div><div class="civRows">${["firepit","hut","stockpile","farm","mine","granary","workshop"].map(t=>`<div class="civRow"><span>${t[0].toUpperCase()+t.slice(1)}</span><span>${buildingsOf(t).length}</span></div>`).join('')}</div>`}
-function showCitizen(p){selected=p.id;citizenName.textContent=p.name;citizenSub.textContent=`${Math.floor(p.age)} · ${p.sex==="F"?"Female":"Male"} · ${p.layer==="underground"?"Underground":"Surface"}`;const partner=p.partner?people.find(q=>q.id===p.partner):null,parents=p.parents.map(id=>people.find(q=>q.id===id)).filter(Boolean);citizenBody.innerHTML=`<div class="stats"><div class="stat">❤️ Health<b>${Math.round(p.health)}%</b></div><div class="stat">⚡ Energy<b>${Math.round(p.energy)}%</b></div><div class="stat">🍖 Hunger<b>${Math.round(p.hunger)}%</b></div><div class="stat">💧 Thirst<b>${Math.round(p.thirst)}%</b></div></div><div class="citizenRow"><span class="jobBadge">🛠 ${escapeHtml(p.job)}</span><br><b>Goal:</b> ${escapeHtml(p.goal)}<br><b>Mood:</b> ${escapeHtml(p.mood)}</div>${p.carryAmount?`<div class="carry">Carrying ${p.carryAmount} ${p.carryType}</div>`:''}<div class="family"><b>Partner:</b> ${partner?escapeHtml(partner.name):'None'}<br><b>Parents:</b> ${parents.length?parents.map(x=>escapeHtml(x.name)).join(', '):'—'}<br><b>Children:</b> ${p.children.length}</div><div class="memory">Latest memory: ${escapeHtml(p.memory[0]||"None")}</div>`;citizen.classList.remove("hidden")}
+function showCitizen(p){selected=p.id;citizenName.textContent=p.name;citizenSub.textContent=`${Math.floor(p.age)} · ${p.sex==="F"?"Female":"Male"} · ${p.layer==="underground"?"Underground":"Surface"}`;const partner=p.partner?people.find(q=>q.id===p.partner):null,parents=p.parents.map(id=>people.find(q=>q.id===id)).filter(Boolean);citizenBody.innerHTML=`<div class="stats"><div class="stat">❤️ Health<b>${Math.round(p.health)}%</b></div><div class="stat">⚡ Energy<b>${Math.round(p.energy)}%</b></div><div class="stat">🍖 Hunger<b>${Math.round(p.hunger)}%</b></div><div class="stat">💧 Thirst<b>${Math.round(p.thirst)}%</b></div></div><div class="citizenRow"><span class="jobBadge">🛠 ${escapeHtml(p.job)}</span> <span class="jobBadge">🧠 ${escapeHtml(aiTraitLabel(p))}</span><br><b>Current goal:</b> ${escapeHtml(p.goal)}<br><b>Long goal:</b> ${escapeHtml(p.longGoal||"Build a stable life")}<br><b>Mood:</b> ${escapeHtml(p.mood)}<br><b>Decision:</b> ${escapeHtml(p.decisionReason||"Observing the world")}</div>${p.carryAmount?`<div class="carry">Carrying ${p.carryAmount} ${p.carryType}</div>`:''}<div class="family"><b>Partner:</b> ${partner?escapeHtml(partner.name):'None'}<br><b>Parents:</b> ${parents.length?parents.map(x=>escapeHtml(x.name)).join(', '):'—'}<br><b>Children:</b> ${p.children.length}</div><div class="memory">Latest memory: ${escapeHtml(p.memory[0]||"None")}</div>`;citizen.classList.remove("hidden")}
 const toolMeta={
   inspect:["👁","Inspect","Tap a person"],land:["🌱","Raise Land","Drag to terraform"],water:["🌊","Water","Drag to carve water"],grass:["🌿","Grassland","Paint a biome"],forest:["🌲","Forest","Paint a biome"],sand:["🏜️","Desert","Paint a biome"],snow:["❄️","Snow","Paint a biome"],mountain:["⛰️","Mountain","Raise mountains"],
   rain:["🌧","Rain","Bless the land"],drought:["☀️","Drought","Dry the land"],fire:["🔥","Fire","Burn an area"],lava:["🌋","Lava","Create molten ground"],lightning:["⚡","Lightning","Strike the world"],heal:["💚","Heal","Heal living people"],bless:["✨","Bless","Restore people nearby"],
@@ -718,7 +780,7 @@ function worldOverviewHtml(){
 function peopleHtml(){
   const alive=people.filter(p=>p.alive);
   if(!alive.length)return `<div class="emptyState">There are no living people in this world.</div>`;
-  return `<div class="menuHero"><div class="eyebrow">Population</div><h3>${alive.length} living people</h3><p>Tap a person to open their full citizen card.</p></div>${alive.slice().sort((a,b)=>a.age-b.age).map(p=>`<button class="listCard" data-person="${p.id}" type="button"><div class="avatar">${p.sex==="F"?"👩":"👨"}</div><div class="grow"><b>${escapeHtml(p.name)}</b><small>Age ${Math.floor(p.age)} · ${escapeHtml(p.job)} · ${escapeHtml(p.goal)}</small></div><div class="rightText">❤️ ${Math.round(p.health)}<br>${p.children.length} child${p.children.length===1?"":"ren"}</div></button>`).join("")}`
+  return `<div class="menuHero"><div class="eyebrow">Population</div><h3>${alive.length} living people</h3><p>Tap a person to open their full citizen card.</p></div>${alive.slice().sort((a,b)=>a.age-b.age).map(p=>`<button class="listCard" data-person="${p.id}" type="button"><div class="avatar">${p.sex==="F"?"👩":"👨"}</div><div class="grow"><b>${escapeHtml(p.name)}</b><small>${escapeHtml(aiTraitLabel(p))} · age ${Math.floor(p.age)} · ${escapeHtml(p.job)} · ${escapeHtml(p.goal)}</small></div><div class="rightText">❤️ ${Math.round(p.health)}<br>${p.children.length} child${p.children.length===1?"":"ren"}</div></button>`).join("")}`
 }
 function villageHtml(){
   const counts=jobCounts(),complete=buildings.filter(b=>b.complete),pending=buildings.filter(b=>!b.complete);
@@ -743,8 +805,8 @@ function settingsHtml(){
   <div class="menuSection">World management</div><button class="bigAction" data-action="center-world" type="button">⌾ Center on First Hearth</button><button class="bigAction" data-action="open-world-creator" type="button">🌍 Open World Creator</button><button class="bigAction danger" data-action="open-world-reset" type="button">↺ Reset Current World</button>`
 }
 function updatesHtml(){
-  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V5 · Visual Overhaul</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
-  <div class="updateItem"><b>V5 — Visual Overhaul</b><small>Current</small><p>A complete premium UI refresh, a new atlas minimap, richer terrain shading, better water, forests, mountains, buildings, villagers, wildlife and atmosphere.</p></div>
+  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V5.1 · Living World</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
+  <div class="updateItem"><b>V5.1 — Living World</b><small>Current</small><p>Compact HUD and menus, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs, relationships and smarter citizen decision reasoning.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
   <div class="updateItem"><b>V4.1 — Underground</b><small>Previous</small><p>Surface/Underground toggle, caves, deep stone, underground lakes, magma, iron/gold/coal/crystal veins, mine entrances, tunneling miners and layer-aware god powers.</p></div>
   <div class="updateItem"><b>V4 — World Control</b><small>Previous</small><p>World, God Powers and Resources tabs; full people/village/history/settings panels; biome painting; fire and lava; iron and gold; wildlife; direct people spawning; persistent visual settings.</p></div>
   <div class="updateItem"><b>V3 — Civilization</b><small>Previous</small><p>Families, jobs, farms, stockpiles, building construction, discoveries and village growth.</p></div>
@@ -827,6 +889,8 @@ menuBody.addEventListener("click",e=>{
 });
 pauseBtn.addEventListener("click",()=>{paused=!paused;updateUI()});speedBtn.addEventListener("click",()=>{speed=speed===1?2:speed===2?5:1;updateUI()});window.addEventListener("resize",resizeCanvas);window.addEventListener("orientationchange",()=>setTimeout(resizeCanvas,120));
 miniMap.addEventListener("pointerdown",e=>{e.stopPropagation();const rect=miniMap.getBoundingClientRect(),px=(e.clientX-rect.left)/rect.width,py=(e.clientY-rect.top)/rect.height;camX=clamp(px*WORLD_W,0,WORLD_W);camY=clamp(py*WORLD_H,0,WORLD_H);clampCamera();showToast("Atlas moved camera")});
+miniMapToggle.addEventListener("click",e=>{e.stopPropagation();miniMapPanel.classList.toggle("compact");miniMapToggle.querySelector("small").textContent=miniMapPanel.classList.contains("compact")?"⌄":"⌃"});
+uiToggleBtn.addEventListener("click",()=>{appEl.classList.toggle("uiHidden");uiToggleBtn.textContent=appEl.classList.contains("uiHidden")?"◩":"◫";uiToggleBtn.setAttribute("aria-label",appEl.classList.contains("uiHidden")?"Show interface":"Hide interface")});
 setTimeout(()=>document.getElementById("splash")?.classList.add("hide"),650);
 try{
   generate(false);resizeCanvas();refreshToolChip();

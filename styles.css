@@ -446,3 +446,193 @@ button.active{
   #miniMap{height:82px}
   #status{display:none}
 }
+
+
+/* ================================================================
+   V5.1 — COMPACT HUD / MORE WORLD, LESS UI
+   ================================================================ */
+.topbar{
+  top:calc(env(safe-area-inset-top) + 7px);
+  left:calc(env(safe-area-inset-left) + 7px);
+  right:calc(env(safe-area-inset-right) + 7px);
+  gap:5px;
+}
+.worldhud,.hudcontrols{
+  pointer-events:auto;
+  height:44px;
+  display:flex;align-items:center;
+  background:linear-gradient(180deg,rgba(12,24,31,.82),rgba(7,16,21,.76));
+  border:1px solid rgba(255,255,255,.095);
+  box-shadow:0 8px 20px rgba(0,0,0,.16),inset 0 1px 0 rgba(255,255,255,.05);
+  backdrop-filter:blur(15px);-webkit-backdrop-filter:blur(15px);
+}
+.worldhud{border-radius:15px;padding:0 5px}
+.hudcontrols{border-radius:15px;padding:3px;gap:2px}
+.hudstat{
+  height:34px;min-width:45px;padding:0 8px;
+  display:flex;align-items:center;justify-content:center;gap:5px;
+  border-right:1px solid rgba(255,255,255,.065)
+}
+.hudstat span{font-size:16px}.hudstat b{font-size:13px}
+.hudera{
+  min-width:0;max-width:100px;height:34px;padding:0 9px;
+  display:flex;align-items:center;gap:5px;
+}
+.hudera span{font-size:15px}.hudera b{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hudcontrols .iconbtn,.hudcontrols .speedbtn{
+  width:38px;min-width:38px;height:36px;min-height:36px;padding:0;
+  border:0;background:transparent;box-shadow:none;border-radius:11px
+}
+.hudcontrols .iconbtn.active{
+  background:rgba(105,161,84,.20);border:1px solid rgba(147,220,128,.22)
+}
+.hudcontrols .speedbtn{width:42px;min-width:42px;font-size:12px}
+.layerbtn{
+  top:calc(env(safe-area-inset-top) + 58px);
+  min-height:36px;height:36px;
+  padding:0 9px;border-radius:12px;
+}
+.layerbtn span{font-size:14px}.layerbtn b{font-size:10px}.layerbtn small{font-size:9px}
+.uiToggleBtn{
+  position:absolute;z-index:31;
+  top:calc(env(safe-area-inset-top) + 58px);
+  right:calc(env(safe-area-inset-right) + 116px);
+  width:36px;min-width:36px;height:36px;min-height:36px;padding:0;
+  border-radius:12px;
+  background:rgba(10,21,27,.82);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  font-size:16px
+}
+
+/* Atlas is now only a tiny button by default. */
+.minimapPanel{
+  top:calc(env(safe-area-inset-top) + 100px);
+  right:calc(env(safe-area-inset-right) + 8px);
+  width:142px;padding:6px;border-radius:15px;
+  transition:width .18s ease,transform .18s ease,opacity .18s ease
+}
+.minimapPanel.compact{
+  width:auto;padding:0;background:transparent;border:0;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none
+}
+.minimapToggle{
+  display:flex;align-items:center;gap:5px;
+  height:36px;min-height:36px;padding:0 9px;border-radius:12px;
+  font-size:10px;
+  background:linear-gradient(180deg,rgba(12,24,31,.90),rgba(7,16,21,.86));
+  box-shadow:0 8px 18px rgba(0,0,0,.16)
+}
+.minimapToggle span{font-size:14px}.minimapToggle b{font-size:10px}.minimapToggle small{font-size:9px;color:#9eb0b7}
+.minimapContent{display:block}
+.minimapPanel.compact .minimapContent{display:none}
+.minimapPanel:not(.compact) .minimapToggle{margin-left:auto;margin-bottom:5px}
+.minimapHead{margin-bottom:5px}
+.minimapHead b{font-size:9px}.minimapHead small{font-size:9px}
+#miniMap{height:84px;border-radius:10px}
+
+/* Tool display becomes a small one-line capsule. */
+.toolchip{
+  left:calc(env(safe-area-inset-left) + 8px);
+  bottom:calc(env(safe-area-inset-bottom) + 65px);
+  min-height:44px;height:44px;
+  width:auto;max-width:calc(100% - 16px);
+  gap:7px;padding:4px 5px 4px 9px;border-radius:14px
+}
+.toolchip>span{font-size:19px}
+.toolchip>div{min-width:70px}
+.toolchip>div b{font-size:11px}
+.toolchip>div small{font-size:8px;max-width:135px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.toolchip button{
+  min-width:42px;height:34px;min-height:34px;padding:0 7px
+}
+.toolchip button span{font-size:13px}.toolchip button b{font-size:10px}
+.srStatus{
+  position:absolute!important;width:1px!important;height:1px!important;padding:0!important;
+  overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important
+}
+
+/* Bottom nav loses a lot of bulk. */
+.mainnav{
+  left:calc(env(safe-area-inset-left) + 7px);
+  right:calc(env(safe-area-inset-right) + 7px);
+  bottom:calc(env(safe-area-inset-bottom) + 6px);
+  height:54px;padding:4px;gap:4px;border-radius:18px
+}
+.navtab{min-height:44px;height:44px;border-radius:13px;gap:0}
+.navtab span{font-size:18px;line-height:20px}
+.navtab b{font-size:9px}
+
+/* Menus now behave like compact control trays instead of taking 3/4 screen. */
+.gamesheet{
+  height:min(56vh,510px);
+  padding:6px max(10px,env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) + 60px) max(10px,env(safe-area-inset-left));
+  border-radius:20px 20px 0 0
+}
+.sheetHandle{margin-bottom:4px;width:36px;height:4px}
+.sheetHead{height:38px}
+.sheetHead>div>b{font-size:18px}
+.sheetHead .muted{font-size:9px}
+.sheetHead .close{width:34px;min-width:34px;height:34px;min-height:34px}
+.segments{margin:2px -1px 5px;padding-bottom:2px}
+.segment{min-height:30px;height:30px;padding:0 9px;font-size:9px}
+.menuBody{height:calc(100% - 48px);padding-bottom:10px}
+.segments:not(.hidden)+.menuBody{height:calc(100% - 82px)}
+.menuHero{padding:10px;border-radius:14px;margin-bottom:7px}
+.menuHero h3{font-size:18px;margin:3px 0 2px}
+.menuHero p{font-size:10px;line-height:1.35}
+.menuHero .eyebrow{font-size:8px}
+.menuSection{margin:10px 0 5px;font-size:8px}
+.menuGrid,.actionGrid{gap:5px}
+.menuStat{min-height:62px;padding:8px;border-radius:12px}
+.menuStat small{font-size:8px}.menuStat b{font-size:17px}
+.actionGrid{grid-template-columns:repeat(4,1fr)}
+.actionCard{min-height:65px;padding:5px 3px;border-radius:11px}
+.actionCard .emoji{font-size:21px;line-height:22px}
+.actionCard b{font-size:9px}
+.actionCard small{font-size:7px;line-height:1.05}
+.listCard{min-height:46px;padding:7px;border-radius:11px;margin-bottom:4px}
+.listCard .avatar{width:32px;height:32px;border-radius:9px;font-size:17px}
+.listCard .grow b{font-size:11px}.listCard .grow small{font-size:8px}
+.settingRow{padding:8px;border-radius:11px;margin-bottom:5px}
+.settingRow b{font-size:11px}.settingRow small{font-size:8px}
+.resourceCard{padding:7px;border-radius:10px;font-size:9px}
+.resourceCard b{font-size:15px}
+.creatorRow{padding:7px 8px;margin-bottom:5px;border-radius:11px}
+.creatorLabel{margin-bottom:4px}
+.creatorLabel>span{font-size:16px}
+.creatorLabel b{font-size:10px}.creatorLabel small{font-size:9px}
+.creatorRow input[type="range"]{height:22px}
+.bigAction{min-height:40px;margin-top:5px;font-size:11px}
+.warningBox{padding:8px;font-size:9px}
+.updateItem{padding:8px 2px}.updateItem b{font-size:11px}.updateItem p{font-size:9px}
+
+/* Citizen card is compact too. */
+.drawer.left{
+  bottom:calc(env(safe-area-inset-bottom) + 64px);
+  width:min(82vw,325px);max-height:48vh;padding:9px;border-radius:16px
+}
+.drawerhead{margin-bottom:5px}.drawerhead b{font-size:15px}.drawerhead .muted{font-size:9px}
+.stats{gap:5px;margin-top:5px}.stat{padding:6px;border-radius:9px;font-size:9px}.stat b{font-size:14px}
+.citizenRow{font-size:10px;line-height:1.4;margin-top:6px}.family,.memory,.carry{font-size:9px}
+
+/* Cinematic UI-hide mode. */
+#app.uiHidden .topbar,
+#app.uiHidden .layerbtn,
+#app.uiHidden .minimapPanel,
+#app.uiHidden .toolchip,
+#app.uiHidden .mainnav{opacity:0;pointer-events:none}
+#app.uiHidden .uiToggleBtn{
+  opacity:.55;right:calc(env(safe-area-inset-right) + 8px)
+}
+.topbar,.layerbtn,.minimapPanel,.toolchip,.mainnav{
+  transition:opacity .16s ease,transform .16s ease
+}
+
+@media(max-width:390px){
+  .hudera{max-width:76px}
+  .actionGrid{grid-template-columns:repeat(4,1fr)}
+  .gamesheet{height:min(54vh,470px)}
+}
+@media(max-width:350px){
+  .hudera{display:none}
+  .actionGrid{grid-template-columns:repeat(3,1fr)}
+}

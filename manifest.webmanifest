@@ -1,7 +1,7 @@
 {
   "name": "Tiny World",
   "short_name": "Tiny World",
-  "description": "A polished pocket civilization god sandbox with a premium UI, atlas minimap, and richer world visuals above and below ground.",
+  "description": "A living pocket civilization sandbox with compact controls, smarter citizens, world creation, god powers and underground simulation.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
