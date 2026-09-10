@@ -13,13 +13,30 @@ const inspectBtn=document.getElementById("inspectBtn"),toolIcon=document.getElem
 const layerBtn=document.getElementById("layerBtn"),layerIcon=document.getElementById("layerIcon"),layerLabel=document.getElementById("layerLabel");
 const miniMap=document.getElementById("miniMap"),miniMapMode=document.getElementById("miniMapMode"),mmctx=miniMap.getContext("2d",{alpha:false}),miniMapPanel=document.getElementById("miniMapPanel"),miniMapToggle=document.getElementById("miniMapToggle"),uiToggleBtn=document.getElementById("uiToggleBtn"),appEl=document.getElementById("app");
 
-const WORLD_W=420,WORLD_H=300,N=WORLD_W*WORLD_H;
+let WORLD_W=200,WORLD_H=200,N=WORLD_W*WORLD_H;
 const T={DEEP:0,WATER:1,SAND:2,GRASS:3,FOREST:4,MOUNTAIN:5,SNOW:6,LAVA:7};
-const terrain=new Uint8Array(N),height=new Float32Array(N),moisture=new Float32Array(N),food=new Uint8Array(N),trees=new Uint8Array(N),rocks=new Uint8Array(N),iron=new Uint8Array(N),gold=new Uint8Array(N),wet=new Uint8Array(N),scar=new Uint8Array(N),burn=new Uint8Array(N),trail=new Uint8Array(N);
+let terrain,height,moisture,food,trees,rocks,iron,gold,wet,scar,burn,trail;
 const U={CAVE:0,DIRT:1,STONE:2,DEEP:3,WATER:4,MAGMA:5};
-const underground=new Uint8Array(N),uStone=new Uint8Array(N),uIron=new Uint8Array(N),uGold=new Uint8Array(N),uCoal=new Uint8Array(N),uCrystal=new Uint8Array(N),uGlow=new Uint8Array(N);
-const TEX=2,terrainCanvas=document.createElement("canvas");terrainCanvas.width=WORLD_W*TEX;terrainCanvas.height=WORLD_H*TEX;const tctx=terrainCanvas.getContext("2d");
-const undergroundCanvas=document.createElement("canvas");undergroundCanvas.width=WORLD_W*TEX;undergroundCanvas.height=WORLD_H*TEX;const uctx=undergroundCanvas.getContext("2d");
+let underground,uStone,uIron,uGold,uCoal,uCrystal,uGlow;
+let TEX=2;
+const terrainCanvas=document.createElement("canvas"),tctx=terrainCanvas.getContext("2d");
+const undergroundCanvas=document.createElement("canvas"),uctx=undergroundCanvas.getContext("2d");
+function allocateWorld(size=200){
+  const allowed=[100,150,200,300,500];
+  const s=allowed.includes(Number(size))?Number(size):200;
+  WORLD_W=s;WORLD_H=s;N=s*s;
+  TEX=s>=500?1:2;
+  terrain=new Uint8Array(N);height=new Float32Array(N);moisture=new Float32Array(N);
+  food=new Uint8Array(N);trees=new Uint8Array(N);rocks=new Uint8Array(N);
+  iron=new Uint8Array(N);gold=new Uint8Array(N);wet=new Uint8Array(N);
+  scar=new Uint8Array(N);burn=new Uint8Array(N);trail=new Uint8Array(N);
+  underground=new Uint8Array(N);uStone=new Uint8Array(N);uIron=new Uint8Array(N);
+  uGold=new Uint8Array(N);uCoal=new Uint8Array(N);uCrystal=new Uint8Array(N);
+  uGlow=new Uint8Array(N);
+  terrainCanvas.width=WORLD_W*TEX;terrainCanvas.height=WORLD_H*TEX;
+  undergroundCanvas.width=WORLD_W*TEX;undergroundCanvas.height=WORLD_H*TEX
+}
+allocateWorld(200);
 const names=["Mara","Dren","Tala","Korin","Nia","Rook","Sela","Bram","Ira","Eren","Veya","Lio","Asha","Toren","Mira","Kael","Rin","Orin","Nora","Vale","Edda","Jori","Lena","Oren","Tavi","Sora","Dara","Milo"];
 const nameStart=["Ael","Ar","Ash","Bel","Bra","Cal","Cor","Da","Del","El","Eri","Fa","Fen","Gal","Hal","Ily","Jar","Ka","Kel","Kor","La","Len","Ma","Mer","Na","Ner","O","Or","Ra","Ren","Sa","Sel","Ta","Tor","Va","Vel","Wen","Yor","Zel"];
 const nameMiddle=["","a","e","i","o","u","an","en","in","or","ar","el","ir","al","on","eth","is","ra","ri","lo","va","na"];
@@ -34,7 +51,7 @@ let settlement=null,day=1,tick=0,paused=false,speed=1,tool="inspect",brush=12,se
 let camX=WORLD_W/2,camY=WORLD_H/2,zoom=4,displayScale=1,pointers=new Map(),dragging=false,last={x:0,y:0},pinchStart=null,paintStamp=0,lastSim=0,toastTimer=null,nextPersonId=1,nextBuildingId=1,nextCritterId=1;
 let mainTab="world",worldSection="overview",newWorldArmed=false,resetWorldArmed=false;
 let activeLayer="surface",resourceLayer="surface",undergroundDirty=true;
-const defaultWorldConfig={seed:"random",landmass:50,water:50,forest:52,mountains:42,wildlife:50,startPopulation:2,startingFood:12,startingWood:4};
+const defaultWorldConfig={seed:"random",worldSize:200,landmass:50,water:50,forest:52,mountains:42,wildlife:50,startPopulation:2,startingFood:12,startingWood:4};
 let worldConfig=Object.assign({},defaultWorldConfig);
 let lastGeneratedConfig=Object.assign({},defaultWorldConfig);
 let settings={labels:true,trails:true,dayNight:true,effects:true};try{settings=Object.assign(settings,JSON.parse(localStorage.getItem("tinyWorldSettings")||"{}"))}catch(e){}try{worldConfig=Object.assign(worldConfig,JSON.parse(localStorage.getItem("tinyWorldConfig")||"{}"))}catch(e){}
@@ -65,6 +82,8 @@ function seedFromInput(v){
 }
 function normalizeWorldConfig(cfg){
   const c=Object.assign({},defaultWorldConfig,cfg||{});
+  const sizes=[100,150,200,300,500];
+  c.worldSize=sizes.includes(Number(c.worldSize))?Number(c.worldSize):200;
   c.landmass=clamp(Number(c.landmass)||50,10,90);
   c.water=clamp(Number(c.water)||50,10,90);
   c.forest=clamp(Number(c.forest)||50,0,100);
@@ -76,6 +95,11 @@ function normalizeWorldConfig(cfg){
   c.seed=String(c.seed??"random");
   return c
 }
+function populationCapForWorld(){
+  const s=configValue("worldSize");
+  return s<=100?36:s<=150?44:s<=200?56:s<=300?90:150
+}
+function worldAreaLabel(){return `${WORLD_W}×${WORLD_H}`}
 function resetCurrentWorld(){
   worldConfig=Object.assign({},lastGeneratedConfig);
   generate(true);
@@ -637,7 +661,7 @@ function updateRelationships(){
   }
 }
 function tryBirths(){
-  if(people.filter(p=>p.alive).length>=48)return;
+  if(people.filter(p=>p.alive).length>=populationCapForWorld())return;
   if(homeCapacity()<=people.filter(p=>p.alive).length)return;
   if(settlement.food<12)return;
   for(const mother of people){
@@ -705,15 +729,16 @@ function simulate(){if(paused)return;const loops=speed===1?1:speed===2?2:5;for(l
   particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.life--;p.vy+=p.type==="leaf"?.006:0});particles=particles.filter(p=>p.life>0);clouds.forEach(c=>{c.life--;c.phase+=.015;c.x+=.015});clouds=clouds.filter(c=>c.life>0);updateUI()}
 
 function generate(useExistingSeed=false){
-  worldConfig=normalizeWorldConfig(worldConfig);
+  if(useExistingSeed){worldConfig=normalizeWorldConfig(lastGeneratedConfig)}
+  else{worldConfig=normalizeWorldConfig(worldConfig)}
   saveWorldConfig();
-
+  allocateWorld(configValue("worldSize"));
   if(useExistingSeed){
     worldSeed=seedFromInput(lastGeneratedConfig.seed);
-    worldConfig=Object.assign({},lastGeneratedConfig);
+    worldConfig=Object.assign({},lastGeneratedConfig)
   }else{
     worldSeed=seedFromInput(worldConfig.seed);
-    lastGeneratedConfig=Object.assign({},worldConfig,{seed:String(worldSeed)});
+    lastGeneratedConfig=Object.assign({},worldConfig,{seed:String(worldSeed)})
   }
 
   const landBias=(configValue("landmass")-50)*.0018-(configValue("water")-50)*.0016;
@@ -734,8 +759,10 @@ function generate(useExistingSeed=false){
   }
 
   let sx=WORLD_W>>1,sy=WORLD_H>>1,best=null,bestScore=-999;
-  for(let n=0;n<700;n++){
-    const x=clamp((WORLD_W>>1)+rndi(-110,110),8,WORLD_W-9),y=clamp((WORLD_H>>1)+rndi(-82,82),8,WORLD_H-9),t=terrain[idx(x,y)];
+  const searchX=Math.max(24,Math.round(WORLD_W*.38)),searchY=Math.max(24,Math.round(WORLD_H*.38));
+  const siteTries=Math.round(450+WORLD_W*1.25);
+  for(let n=0;n<siteTries;n++){
+    const x=clamp((WORLD_W>>1)+rndi(-searchX,searchX),8,WORLD_W-9),y=clamp((WORLD_H>>1)+rndi(-searchY,searchY),8,WORLD_H-9),t=terrain[idx(x,y)];
     if(t!==T.GRASS&&t!==T.FOREST)continue;
     let score=0;
     for(let yy=-12;yy<=12;yy+=3)for(let xx=-12;xx<=12;xx+=3){
@@ -747,7 +774,7 @@ function generate(useExistingSeed=false){
     if(score>bestScore){bestScore=score;best={x,y}}
   }
   if(best){sx=best.x;sy=best.y}
-  paint(sx,sy,25,"land",false);
+  paint(sx,sy,Math.max(11,Math.min(25,Math.round(WORLD_W*.10))),"land",false);
 
   nextPersonId=1;nextBuildingId=1;nextCritterId=1;
   usedNames.clear();usedFirstNames.clear();
@@ -773,12 +800,13 @@ function generate(useExistingSeed=false){
   generateUnderground();
   addBuilding("firepit",sx,sy,true);
 
-  const deerCount=Math.round(2+6*wildlifeScale),sheepCount=Math.round(3*wildlifeScale),wolfCount=Math.round(1.5*wildlifeScale);
+  const sizeScale=clamp(configValue("worldSize")/200,.5,2.5);
+  const deerCount=Math.round((2+6*wildlifeScale)*sizeScale),sheepCount=Math.round(3*wildlifeScale*sizeScale),wolfCount=Math.round(1.5*wildlifeScale*sizeScale);
   for(let n=0;n<deerCount;n++)spawnCritter("deer",sx+rndi(-28,28),sy+rndi(-22,22),1);
   for(let n=0;n<sheepCount;n++)spawnCritter("sheep",sx+rndi(-30,30),sy+rndi(-24,24),1);
   for(let n=0;n<wolfCount;n++)spawnCritter("wolf",sx+rndi(-42,42),sy+rndi(-32,32),1);
 
-  addEvent(`${people.map(p=>p.name).slice(0,2).join(" and ")} founded First Hearth in world seed ${worldSeed}.`,"founding");
+  addEvent(`${people.map(p=>p.name).slice(0,2).join(" and ")} founded First Hearth in a ${WORLD_W}×${WORLD_H} world, seed ${worldSeed}.`,"founding");
   assignJobs();clampCamera();updateUI();
   showToast(useExistingSeed?"World reset":"New customized world created")
 }
@@ -1036,8 +1064,15 @@ function rangeRow(key,title,icon,min,max,step=1,suffix=""){
   const v=worldConfig[key];
   return `<div class="creatorRow"><div class="creatorLabel"><span>${icon}</span><div><b>${title}</b><small id="${key}Value">${v}${suffix}</small></div></div><input data-world-range="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${v}"></div>`
 }
+function worldSizeChoices(){
+  const sizes=[100,150,200,300,500];
+  return `<div class="worldSizeGrid">${sizes.map(s=>`<button class="worldSizeChoice ${Number(worldConfig.worldSize)===s?"selected":""}" data-world-size="${s}" type="button"><b>${s}×${s}</b><small>${s===100?"Tiny":s===150?"Small":s===200?"Standard":s===300?"Large":"Huge"}</small></button>`).join("")}</div>`
+}
 function worldCreatorHtml(){
   return `<div class="menuHero"><div class="eyebrow">World Generator</div><h3>Create Your World</h3><p>Change the world before generating it. The same settings can later be used to reset this world.</p></div>
+  <div class="menuSection">World Size</div>
+  ${worldSizeChoices()}
+  <div class="sizeNotice">${Number(worldConfig.worldSize)===500?"500×500 contains 250,000 simulation cells. Generation can take a little longer on iPhone.":"Default size is 200×200."}</div>
   <div class="menuSection">Seed</div>
   <div class="seedRow"><input id="worldSeedInput" value="${escapeHtml(worldConfig.seed)}" placeholder="random or custom seed"><button data-action="randomize-seed" type="button">🎲 Random</button></div>
   <div class="menuSection">Terrain</div>
@@ -1058,6 +1093,7 @@ function worldResetHtml(){
   return `<div class="menuHero"><div class="eyebrow">World Reset</div><h3>Restart Current World</h3><p>This regenerates the current seed with the exact customization settings that created it.</p></div>
   <div class="civRows">
     <div class="civRow"><span>Seed</span><span>${escapeHtml(String(lastGeneratedConfig.seed))}</span></div>
+    <div class="civRow"><span>World size</span><span>${lastGeneratedConfig.worldSize||200}×${lastGeneratedConfig.worldSize||200}</span></div>
     <div class="civRow"><span>Land / water</span><span>${lastGeneratedConfig.landmass}% / ${lastGeneratedConfig.water}%</span></div>
     <div class="civRow"><span>Forest / mountains</span><span>${lastGeneratedConfig.forest}% / ${lastGeneratedConfig.mountains}%</span></div>
     <div class="civRow"><span>Starting population</span><span>${lastGeneratedConfig.startPopulation}</span></div>
@@ -1066,7 +1102,7 @@ function worldResetHtml(){
   <button class="bigAction danger" data-action="reset-current-world" type="button">${resetWorldArmed?"⚠️ Tap again to confirm reset":"↺ Reset Current World"}</button>`
 }
 function worldOverviewHtml(){
-  return `<div class="menuHero"><div class="eyebrow">Current world</div><h3>${escapeHtml(settlement.name)}</h3><p>Day ${Math.floor(day)} · ${eraName()} · Seed ${worldSeed}</p></div>
+  return `<div class="menuHero"><div class="eyebrow">Current world · ${worldAreaLabel()}</div><h3>${escapeHtml(settlement.name)}</h3><p>Day ${Math.floor(day)} · ${eraName()} · Seed ${worldSeed}</p></div>
   <div class="menuGrid"><div class="menuStat"><small>Population</small><b>${people.filter(p=>p.alive).length}</b></div><div class="menuStat"><small>Wild creatures</small><b>${critters.length}</b></div><div class="menuStat"><small>Buildings</small><b>${buildings.filter(b=>b.complete).length}</b></div><div class="menuStat"><small>Discoveries</small><b>${settlement.tech.size}</b></div></div>
   <div class="menuSection">World makeup</div>
   <div class="civRows"><div class="civRow"><span>🌿 Habitable land</span><span>${Math.round((tileCount(T.GRASS)+tileCount(T.FOREST)+tileCount(T.SAND))/N*100)}%</span></div><div class="civRow"><span>🌊 Water</span><span>${Math.round((tileCount(T.WATER)+tileCount(T.DEEP))/N*100)}%</span></div><div class="civRow"><span>⛰ Mountain / snow</span><span>${Math.round((tileCount(T.MOUNTAIN)+tileCount(T.SNOW))/N*100)}%</span></div><div class="civRow"><span>🌋 Lava</span><span>${tileCount(T.LAVA)} tiles</span></div><div class="civRow"><span>⛏ Underground mines</span><span>${buildingsOf("mine").length}</span></div><div class="civRow"><span>⛓ Underground iron</span><span>${undergroundCount(uIron)}</span></div><div class="civRow"><span>🟡 Underground gold</span><span>${undergroundCount(uGold)}</span></div></div>`
@@ -1099,8 +1135,8 @@ function settingsHtml(){
   <div class="menuSection">World management</div><button class="bigAction" data-action="center-world" type="button">⌾ Center on First Hearth</button><button class="bigAction" data-action="open-world-creator" type="button">🌍 Open World Creator</button><button class="bigAction danger" data-action="open-world-reset" type="button">↺ Reset Current World</button>`
 }
 function updatesHtml(){
-  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V5.3 · Family & Marriage</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
-  <div class="updateItem"><b>V5.3 — Family & Marriage</b><small>Current</small><p>Dating couples now build or lose emotional bonds, can marry or split, married partners adopt one shared surname, and children inherit the married family name or an unmarried parent-selected surname.</p></div><div class="updateItem"><b>V5.2 — Responsive World</b><small>Previous</small><p>Responsive landscape catalogs, smaller wording and procedural unique names.</p></div><div class="updateItem"><b>V5.1 — Living World</b><small>Previous</small><p>Compact HUD, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs and relationships.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
+  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V5.4 · World Scale</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
+  <div class="updateItem"><b>V5.4 — World Scale</b><small>Current</small><p>Choose 100×100, 150×150, 200×200, 300×300 or 500×500 worlds. Default is now 200×200, and surface, underground, Atlas, camera and simulation arrays all resize together.</p></div><div class="updateItem"><b>V5.3 — Family & Marriage</b><small>Previous</small><p>Dating, emotional bonds, marriage, shared surnames, breakups and child surname inheritance.</p></div><div class="updateItem"><b>V5.2 — Responsive World</b><small>Previous</small><p>Responsive landscape catalogs, smaller wording and procedural unique names.</p></div><div class="updateItem"><b>V5.1 — Living World</b><small>Previous</small><p>Compact HUD, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs and relationships.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
   <div class="updateItem"><b>V4.1 — Underground</b><small>Previous</small><p>Surface/Underground toggle, caves, deep stone, underground lakes, magma, iron/gold/coal/crystal veins, mine entrances, tunneling miners and layer-aware god powers.</p></div>
   <div class="updateItem"><b>V4 — World Control</b><small>Previous</small><p>World, God Powers and Resources tabs; full people/village/history/settings panels; biome painting; fire and lava; iron and gold; wildlife; direct people spawning; persistent visual settings.</p></div>
   <div class="updateItem"><b>V3 — Civilization</b><small>Previous</small><p>Families, jobs, farms, stockpiles, building construction, discoveries and village growth.</p></div>
@@ -1168,6 +1204,7 @@ menuBody.addEventListener("input",e=>{
   if(e.target.id==="worldSeedInput"){worldConfig.seed=e.target.value;saveWorldConfig()}
 });
 menuBody.addEventListener("click",e=>{
+  const sizeBtn=e.target.closest("[data-world-size]");if(sizeBtn){worldConfig.worldSize=Number(sizeBtn.dataset.worldSize);saveWorldConfig();renderMainMenu();return}
   const toolBtn=e.target.closest("[data-tool-select]");if(toolBtn){chooseTool(toolBtn.dataset.toolSelect);return}
   const personBtn=e.target.closest("[data-person]");if(personBtn){const p=people.find(q=>q.id===Number(personBtn.dataset.person));if(p){closeMenu();showCitizen(p);camX=p.x;camY=p.y;clampCamera()}return}
   const settingBtn=e.target.closest("[data-setting]");if(settingBtn){const k=settingBtn.dataset.setting;settings[k]=!settings[k];saveSettings();renderMainMenu();return}

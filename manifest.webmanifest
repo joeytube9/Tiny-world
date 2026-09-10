@@ -1,7 +1,7 @@
 {
   "name": "Tiny World",
   "short_name": "Tiny World",
-  "description": "A living civilization sandbox with dating, marriage, evolving emotions, family surnames, children, smarter AI and god powers.",
+  "description": "A dynamically sized civilization sandbox with 100\u00d7100 through 500\u00d7500 worlds, families, marriage, underground simulation and god powers.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

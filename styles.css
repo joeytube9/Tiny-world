@@ -782,3 +782,11 @@ button.active{
   .menuSection{margin:7px 0 3px}
   .menuHero{display:none}
 }
+
+.worldSizeGrid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px;margin-bottom:6px}
+.worldSizeChoice{min-width:0;min-height:48px;padding:5px 2px;border-radius:11px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.worldSizeChoice b{font-size:9px;white-space:nowrap}.worldSizeChoice small{font-size:6.5px;color:#92a7ad}
+.worldSizeChoice.selected{background:linear-gradient(180deg,rgba(104,163,83,.40),rgba(61,104,52,.30));border-color:rgba(155,225,139,.42);box-shadow:0 7px 18px rgba(63,109,51,.22),inset 0 1px 0 rgba(255,255,255,.09)}
+.sizeNotice{padding:6px 8px;border-radius:9px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.055);color:#91a6ac;font-size:7.5px;line-height:1.35}
+@media(max-width:380px){.worldSizeGrid{grid-template-columns:repeat(3,1fr)}}
+@media(orientation:landscape) and (max-height:560px){.worldSizeChoice{min-height:39px}.worldSizeChoice b{font-size:8px}.sizeNotice{font-size:6.5px;padding:4px 6px}}
