@@ -1,7 +1,7 @@
 {
   "name": "Tiny World",
   "short_name": "Tiny World",
-  "description": "Tiny World V10.0.2 speeds up tree/resource spawning by eliminating unnecessary terrain rebuilds, caching tree art, and throttling brush stamps.",
+  "description": "Tiny World V10.1 adds Stone-to-Space civilization ages, a Moon landing program, living perspective history, religious hierarchy and pilgrimages, cultural evolution, denser miniature world scale, and fully inspectable buildings with persistent histories.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

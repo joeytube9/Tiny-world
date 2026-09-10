@@ -58,9 +58,20 @@ const faithWordB=["Sky","Creator","Rain","Dawn","Mercy","Storm","Earth","Flame",
 const currencyRoots=["crown","mark","sun","leaf","river","star","stone","talon","ember","grain","ring","vale"];
 const divinePositive=new Set(["rain","heal","bless","food","trees","land","grass","forest","creation"]);
 const divineFearful=new Set(["lightning","fire","lava","drought","water","mountain"]);
+const AGE_DEFS=[
+  {key:"stone",name:"Stone Age",icon:"🪨",threshold:0,desc:"Caveman shelters, fire, hunting and oral tradition."},
+  {key:"bronze",name:"Bronze Age",icon:"🏺",threshold:90,desc:"Early metalwork, organized craft and permanent villages."},
+  {key:"iron",name:"Iron Age",icon:"⚔️",threshold:230,desc:"Iron tools, forges, stronger farming and expanding towns."},
+  {key:"medieval",name:"Medieval Age",icon:"🏰",threshold:470,desc:"Libraries, guilds, temples, kingdoms and written chronicles."},
+  {key:"industrial",name:"Industrial Age",icon:"⚙️",threshold:850,desc:"Factories, power production and mass construction."},
+  {key:"technology",name:"Technology Age",icon:"💻",threshold:1350,desc:"Research labs, advanced medicine and electronic society."},
+  {key:"space",name:"Space Age",icon:"🚀",threshold:2100,desc:"Spaceports, rockets and lunar exploration."}
+];
+const HISTORICAL_KINDS=new Set(["divine","war","battle","kingdom","migration","refugees","religion","culture","discovery","building","death","relationship","economy","age","space"]);
+const BUILDING_LABELS={firepit:"Fire Pit",hut:"Home",stockpile:"Stockpile",farm:"Farm",granary:"Granary",workshop:"Workshop",mine:"Mine",market:"Market",shrine:"Shrine",temple:"Temple",forge:"Forge",library:"Library",guildhall:"Guild Hall",factory:"Factory",powerplant:"Power Plant",lab:"Research Lab",hospital:"Hospital",spaceport:"Spaceport"};
 
-let people=[],buildings=[],events=[],particles=[],clouds=[],constructionQueue=[],critters=[],visualEffects=[],settlements=[],kingdoms=[],wars=[],tradeRoutes=[],cultures=[],religions=[],holySites=[],divineChronicle=[];
-let settlement=null,day=1,tick=0,paused=false,speed=1,tool="inspect",brush=12,selected=null,dirty=true,worldSeed=1,visualTime=0,selectedSettlementId=1,nextSettlementId=1,nextKingdomId=1,nextWarId=1,nextCultureId=1,nextReligionId=1,nextHolySiteId=1,atlasMode="political";
+let people=[],buildings=[],events=[],particles=[],clouds=[],constructionQueue=[],critters=[],visualEffects=[],settlements=[],kingdoms=[],wars=[],tradeRoutes=[],cultures=[],religions=[],holySites=[],divineChronicle=[],chronicles=[];
+let settlement=null,day=1,tick=0,paused=false,speed=1,tool="inspect",brush=12,selected=null,selectedBuilding=null,dirty=true,worldSeed=1,visualTime=0,selectedSettlementId=1,nextSettlementId=1,nextKingdomId=1,nextWarId=1,nextCultureId=1,nextReligionId=1,nextHolySiteId=1,nextChronicleId=1,atlasMode="political",worldMilestones={moonLanding:false,firstMoonSettlementId:null,firstMoonDay:null};
 let camX=WORLD_W/2,camY=WORLD_H/2,zoom=4,displayScale=1,pointers=new Map(),dragging=false,last={x:0,y:0},pinchStart=null,paintStamp=0,lastPaintWorld=null,currentPaintStroke=0,lastSim=0,toastTimer=null,nextPersonId=1,nextBuildingId=1,nextCritterId=1;
 let mainTab="world",worldSection="overview",newWorldArmed=false,resetWorldArmed=false;
 let activeLayer="surface",resourceLayer="surface",undergroundDirty=true;
@@ -284,7 +295,61 @@ function resetCurrentWorld(){
   generate(true);
 }
 function showToast(text){clearTimeout(toastTimer);toast.textContent=text;toast.classList.remove("hidden");toastTimer=setTimeout(()=>toast.classList.add("hidden"),1350)}
-function addEvent(text,kind="world"){events.unshift({day:Math.floor(day),text,kind});events=events.slice(0,160);renderHistory()}
+
+function ageDef(s){return AGE_DEFS[clamp(Number(s?.ageIndex||0),0,AGE_DEFS.length-1)]}
+function ageName(s){return ageDef(s).name}
+function worldHighestAgeIndex(){return settlements.reduce((m,s)=>Math.max(m,Number(s.ageIndex||0)),0)}
+function historyMedium(s){
+  const a=Number(s?.ageIndex||0);
+  return a<=1?"Oral tradition":a===2?"Carved record":a===3?"Written chronicle":a===4?"Printed archive":a===5?"Digital archive":"Orbital archive"
+}
+function perspectiveTone(s){
+  const c=settlementCulture(s),r=settlementReligion(s);
+  if(r&&creatorPerception(s)==="Wrathful")return "fear";
+  if(r&&creatorPerception(s)==="Protective")return "faith";
+  if(c?.values?.includes("Honor"))return "honor";
+  if(c?.values?.includes("Learning"))return "scholarly";
+  if(c?.values?.includes("Tradition"))return "traditional";
+  return "plain"
+}
+function perspectiveText(s,text,kind){
+  const tone=perspectiveTone(s),ours=text.includes(s.name);
+  if(kind==="divine"){
+    const view=creatorPerception(s);
+    if(view==="Protective")return `Our people remembered this as evidence that the Creator watched over ${s.name}.`;
+    if(view==="Wrathful")return `The event entered memory as a warning of the Creator's anger and power.`;
+    if(view==="Distant")return `Later storytellers debated whether the Creator had truly acted at all.`;
+    return `Witnesses in ${s.name} preserved the event as a mysterious sign from the Creator.`
+  }
+  if(kind==="war"||kind==="battle"){
+    if(ours&&tone==="honor")return `The account praised courage, sacrifice and the defense of ${s.name}.`;
+    if(ours)return `Local memory centered the suffering and choices of ${s.name}'s own people.`;
+    return `News reached ${s.name} through travelers, and the conflict was remembered as a distant turning point.`
+  }
+  if(kind==="migration"||kind==="refugees")return ours?`Families retold the journey as part of ${s.name}'s identity.`:`Travelers carried stories of the movement into ${s.name}.`;
+  if(kind==="religion")return tone==="scholarly"?`Scribes compared the new belief with older teachings.`:`Believers and skeptics in ${s.name} argued over what the change meant.`;
+  if(kind==="culture")return `The event became part of how ${s.name} explained its customs and identity.`;
+  if(kind==="age")return `Later generations marked this as the moment ${s.name} left an older way of life behind.`;
+  if(kind==="space")return `This achievement was remembered as the day the sky stopped being the boundary of human life.`;
+  if(kind==="building")return `The structure became a physical marker in ${s.name}'s local memory.`;
+  if(kind==="death")return tone==="traditional"?`The dead were folded into family and ancestor stories.`:`The death was remembered according to the person's place in society.`;
+  return ours?`The event was recorded from ${s.name}'s own point of view.`:`The story entered ${s.name}'s wider world history.`
+}
+function recordPerspectiveEvent(text,kind="world"){
+  if(!HISTORICAL_KINDS.has(kind)||!settlements.length)return;
+  for(const s of settlements){
+    // Keep each settlement's archive bounded and event-driven; this does not run per frame.
+    const entry={id:nextChronicleId++,day:Math.floor(day),settlementId:s.id,kind,source:text,
+      account:perspectiveText(s,text,kind),medium:historyMedium(s),reliability:clamp(58+(s.ageIndex||0)*6+rnd(-8,8),35,99)};
+    chronicles.unshift(entry)
+  }
+  chronicles=chronicles.slice(0,900)
+}
+function settlementChronicles(s,limit=30){return chronicles.filter(c=>c.settlementId===s.id).slice(0,limit)}
+function addEvent(text,kind="world"){
+  events.unshift({day:Math.floor(day),text,kind});events=events.slice(0,220);
+  recordPerspectiveEvent(text,kind);renderHistory()
+}
 function renderHistory(){historyList.innerHTML=events.map(e=>`<div class="event"><div class="eday">DAY ${e.day}</div><div class="etext">${escapeHtml(e.text)}</div></div>`).join("")}
 function discover(name,text,s=settlement){
   if(!s||s.tech.has(name))return;s.tech.add(name);
@@ -355,12 +420,15 @@ function updateCultures(){
     c.prestige=clamp((c.prestige||10)+(s.prosperity-50)*.004+settlementPopulation(s)*.003,0,100);
     const leader=settlementLeader(s);
     if(leader&&(leader.reputation||0)>48&&!c.heroes.includes(leader.id)&&Math.random()<.035){
-      c.heroes.push(leader.id);c.heroes=c.heroes.slice(-8);
+      c.heroes.push(leader.id);c.heroes=c.heroes.slice(-10);leader.historicalTitle=leader.historicalTitle||"Cultural Hero";
       addEvent(`${leader.name} entered ${c.name}'s stories as a celebrated figure.`,"culture")
     }
     for(const p of settlementPeople(s,true)){
       if(!p.cultureId)p.cultureId=s.cultureId;
-      else if(p.cultureId!==s.cultureId&&Math.random()<.018*(p.age<18?2:1))p.cultureId=s.cultureId
+      else if(p.cultureId!==s.cultureId){
+        const attachment=p.culturalAttachment??.6,young=p.age<18?2.2:1;
+        if(Math.random()<.014*young*(1.15-attachment)){p.cultureId=s.cultureId;p.culturalAttachment=clamp(attachment-.10,.15,1);memoryAdd(p,`Adopted more of ${c.name}`)}
+      }else p.culturalAttachment=clamp((p.culturalAttachment||.55)+.002,0,1)
     }
     maybeCultureBranch(s)
   }
@@ -395,9 +463,9 @@ function prophetCandidate(s){
 }
 function createReligion(s,theme="silence",parentReligion=null){
   const prophet=prophetCandidate(s),r={id:nextReligionId++,name:religionNameFor(s,theme),theme,doctrine:doctrineFor(theme),originSettlementId:s.id,
-    foundedDay:Math.floor(day),prophetId:prophet?.id||null,parentId:parentReligion?.id||null,holySiteIds:[],colorIndex:(nextReligionId+2)%polityColors.length,followers:0,prestige:10};
+    foundedDay:Math.floor(day),prophetId:prophet?.id||null,parentId:parentReligion?.id||null,holySiteIds:[],colorIndex:(nextReligionId+2)%polityColors.length,followers:0,prestige:10,teachings:[],religiousLeaderId:prophet?.id||null};
   if(parentReligion){r.name=`${s.name} ${["Reform","Way","Covenant"][rndi(0,2)]}`;r.doctrine=`A new interpretation of ${parentReligion.name}: ${doctrineFor(theme)}`}
-  religions.push(r);s.religionId=r.id;
+  religions.push(r);s.religionId=r.id;r.teachings=[r.doctrine,generatedTeaching(r,s)];
   for(const p of settlementPeople(s,true)){
     if((p.belief||0)>=34||Math.random()<.65)p.religionId=r.id;
     if(p.religionId===r.id)p.belief=clamp((p.belief||45)+rnd(4,14),0,100)
@@ -436,17 +504,68 @@ function maybeReligiousSchism(s){
   const avg=settlementPeople(s,true).reduce((n,p)=>n+(p.belief||0),0)/Math.max(1,settlementPopulation(s));
   if(avg<58||Math.random()>.04)return;const branch=createReligion(s,dominantDivineTheme(s),r);addEvent(`${s.name} broke from ${r.name} and formed ${branch.name}.`,"religion")
 }
+
+function generatedTeaching(r,s){
+  const c=settlementCulture(s),value=c?.values?.[rndi(0,Math.max(0,(c.values?.length||1)-1))]||"Community";
+  const forms=[
+    `${value} is a duty owed to both neighbor and stranger.`,
+    `The signs of ${divineThemeLabel(r.theme)} should be answered with humility rather than certainty.`,
+    `Power without mercy separates people from the Creator.`,
+    `A community is judged by how it treats the hungry, the grieving and the outsider.`,
+    `No ruler stands above the memory of the people.`
+  ];
+  return forms[rndi(0,forms.length-1)]
+}
+function updateFaithPolicy(s){
+  const leader=settlementLeader(s),r=settlementReligion(s);
+  if(!r){s.faithPolicy="Secular";return}
+  const belief=leader?.belief||45,kind=leader?.traits?.kindness||.5,curious=leader?.traits?.curiosity||.5;
+  if(belief>78&&kind<.42)s.faithPolicy="Theocratic";
+  else if(belief>70&&curious>.58)s.faithPolicy="Missionary";
+  else if(belief<30)s.faithPolicy="Secular";
+  else if(kind>.68)s.faithPolicy="Tolerant";
+  else s.faithPolicy="Traditional"
+}
+function assignPilgrimages(){
+  for(const s of settlements){
+    const r=settlementReligion(s);if(!r||!r.holySiteIds.length)continue;
+    const active=settlementPeople(s,true).filter(p=>p.pilgrimage).length;if(active>=2)continue;
+    const candidates=settlementPeople(s,true).filter(p=>p.age>=16&&!p.pilgrimage&&!p.tradeMission&&(p.belief||0)>66&&p.layer!=="underground");
+    if(!candidates.length||Math.random()>.16)continue;
+    const p=candidates[rndi(0,candidates.length-1)],site=holySites.find(h=>r.holySiteIds.includes(h.id));
+    if(site){p.pilgrimage={siteId:site.id,homeId:s.id,state:"outbound"};memoryAdd(p,`Began a pilgrimage to ${site.name}`)}
+  }
+}
+function pilgrimageTravel(p){
+  const m=p.pilgrimage;if(!m)return false;const site=holySites.find(h=>h.id===m.siteId),home=settlementById(m.homeId);
+  if(!site||!home){p.pilgrimage=null;return false}
+  const target=m.state==="outbound"?site:home;
+  if(Math.hypot(p.x-target.x,p.y-target.y)>2){p.goal=m.state==="outbound"?`Pilgrimage to ${site.name}`:`Return from ${site.name}`;p.mood="Pilgrim";moveToward(p,target);return true}
+  if(m.state==="outbound"){p.belief=clamp((p.belief||0)+rnd(5,12),0,100);p.faithStance=faithStance(p);memoryAdd(p,`Visited the holy site ${site.name}`);m.state="return";return true}
+  p.pilgrimage=null;memoryAdd(p,`Returned from pilgrimage to ${site.name}`);return true
+}
 function updateReligions(){
   for(const s of settlements){
+    updateFaithPolicy(s);
     const residents=settlementPeople(s,true);if(!residents.length)continue;
     const avgBelief=residents.reduce((n,p)=>n+(p.belief||0),0)/residents.length;let r=settlementReligion(s);
     if(!r&&((s.divineAttention||0)>=8||(day-s.foundedDay>30&&avgBelief>50)))r=createReligion(s,dominantDivineTheme(s));
     if(r){
       r.followers=religionFollowers(r);r.prestige=clamp((r.prestige||10)+r.followers*.004+(s.prosperity-50)*.002,0,100);
-      for(const p of residents){if(!p.religionId&&p.belief>58&&Math.random()<.04)p.religionId=r.id;else if(p.religionId!==r.id&&p.belief<45&&Math.random()<.015)p.religionId=r.id;p.faithStance=faithStance(p)}
-      const clergy=residents.filter(p=>p.religionId===r.id&&p.age>=18).sort((a,b)=>(b.belief||0)-(a.belief||0)),desired=Math.max(1,Math.ceil(r.followers/18));
-      for(const p of residents)if(p.religiousRole==="Priest")p.religiousRole=null;
-      for(const p of clergy.slice(0,desired))if(p.religiousRole!=="Prophet")p.religiousRole="Priest";
+      for(const p of residents){
+        if(!p.religionId&&p.belief>58&&Math.random()<.04)p.religionId=r.id;
+        else if(p.religionId!==r.id&&p.belief<45&&s.faithPolicy!=="Tolerant"&&Math.random()<.014)p.religionId=r.id;
+        p.faithStance=faithStance(p)
+      }
+      const clergy=residents.filter(p=>p.religionId===r.id&&p.age>=18).sort((a,b)=>((b.belief||0)+(b.reputation||0)*.25)-((a.belief||0)+(a.reputation||0)*.25));
+      const desired=Math.max(1,Math.ceil(r.followers/18));
+      for(const p of residents)if(p.religiousRole==="Priest"||p.religiousRole==="High Priest")p.religiousRole=null;
+      const livingProphet=personById(r.prophetId);
+      if(livingProphet?.alive)livingProphet.religiousRole="Prophet";
+      const high=clergy.find(p=>p.id!==r.prophetId);
+      if(high){high.religiousRole="High Priest";r.religiousLeaderId=high.id}
+      for(const p of clergy.filter(p=>p.id!==high?.id&&p.id!==r.prophetId).slice(0,desired))p.religiousRole="Priest";
+      if(r.teachings&&r.teachings.length<7&&Math.random()<.025){const t=generatedTeaching(r,s);r.teachings.push(t);const teacher=personById(r.religiousLeaderId)||livingProphet;if(teacher)memoryAdd(teacher,`Taught: ${t}`);addEvent(`${r.name} adopted a new teaching: ${t}`,"religion")}
       maybeReligiousSchism(s)
     }else for(const p of residents)p.faithStance=faithStance(p)
   }
@@ -455,6 +574,7 @@ function updateReligions(){
     if(ra&&!rb&&relationScore(a,b)>25&&Math.random()<.035){b.religionId=ra.id;addEvent(`${ra.name} spread along the trade route into ${b.name}.`,"religion")}
     else if(rb&&!ra&&relationScore(a,b)>25&&Math.random()<.035){a.religionId=rb.id;addEvent(`${rb.name} spread along the trade route into ${a.name}.`,"religion")}
   }
+  assignPilgrimages()
 }
 function generatedCurrencyName(s){const c=settlementCulture(s),root=(c?.name.split(" ")[0]||s.name).toLowerCase();return `${root} ${currencyRoots[rndi(0,currencyRoots.length-1)]}${Math.random()<.45?"s":""}`}
 function ensureMarket(s){
@@ -508,6 +628,82 @@ function updateEconomy(){
   assignMerchants()
 }
 function updateV10Systems(){updateCultures();updateReligions();updateEconomy()}
+
+function ageKnowledgeGain(s){
+  const residents=settlementPeople(s,true);if(!residents.length)return 0;
+  const avgEducation=residents.reduce((n,p)=>n+(p.education||0),0)/residents.length;
+  const skilled=residents.reduce((n,p)=>n+Math.max(...Object.values(p.skills||{x:0})),0)/residents.length;
+  const labs=buildingsOf("lab",true,s.id).length,libraries=buildingsOf("library",true,s.id).length,workshops=buildingsOf("workshop",true,s.id).length;
+  const trade=tradeRoutes.some(r=>r.aId===s.id||r.bId===s.id)?1:0;
+  return .9+residents.length*.045+avgEducation*.025+skilled*.010+labs*2.4+libraries*.9+workshops*.35+trade*.45
+}
+function ageRequirementsMet(s,nextIndex){
+  if(nextIndex<=0)return true;
+  const pop=settlementPopulation(s);
+  if(nextIndex===1)return pop>=6&&hasTech("Stoneworking",s);
+  if(nextIndex===2)return pop>=8&&hasTech("Mining",s)&&(s.iron||0)>=3;
+  if(nextIndex===3)return pop>=12&&hasTech("Roads",s)&&buildingsOf("granary",true,s.id).length>0;
+  if(nextIndex===4)return pop>=16&&buildingsOf("forge",true,s.id).length>0&&buildingsOf("workshop",true,s.id).length>0&&(s.iron||0)>=6;
+  if(nextIndex===5)return pop>=20&&buildingsOf("factory",true,s.id).length>0&&buildingsOf("powerplant",true,s.id).length>0;
+  if(nextIndex===6)return pop>=24&&buildingsOf("lab",true,s.id).length>0&&buildingsOf("powerplant",true,s.id).length>0&&(s.iron||0)>=10;
+  return false
+}
+function advanceAge(s,newIndex){
+  if(newIndex<=s.ageIndex||newIndex>=AGE_DEFS.length)return false;
+  const old=ageDef(s),next=AGE_DEFS[newIndex];s.ageIndex=newIndex;s.ageStartedDay=Math.floor(day);
+  s.ageHistory=s.ageHistory||[];s.ageHistory.unshift({day:Math.floor(day),age:next.name});
+  s.knowledge=Math.max(s.knowledge,next.threshold);
+  for(const b of settlementBuildings(s,false))buildingHistoryAdd(b,`${s.name} entered the ${next.name}.`);
+  addEvent(`${s.name} advanced from the ${old.name} into the ${next.name}.`,"age");
+  showToast(`${s.name}: ${next.name}`);
+  return true
+}
+function updateAges(){
+  for(const s of settlements){
+    s.knowledge=(s.knowledge||0)+ageKnowledgeGain(s);
+    const next=(s.ageIndex||0)+1;
+    if(next<AGE_DEFS.length&&s.knowledge>=AGE_DEFS[next].threshold&&ageRequirementsMet(s,next))advanceAge(s,next);
+    updateSpaceProgram(s)
+  }
+}
+function advancedBuildingReady(s,type){
+  return buildings.some(b=>b.settlementId===s.id&&b.type===type)
+}
+function queueAdvancedBuilding(type,wood,stone,iron,gold,s){
+  if(advancedBuildingReady(s,type))return false;
+  if((s.iron||0)<iron||(s.gold||0)<gold)return false;
+  if(!queueBuilding(type,wood,stone,s))return false;
+  s.iron-=iron;s.gold-=gold;
+  const b=buildings.filter(b=>b.settlementId===s.id&&b.type===type).slice(-1)[0];
+  if(b)buildingHistoryAdd(b,`Materials reserved: ${iron} iron and ${gold} gold.`);
+  return true
+}
+function updateAgeConstruction(s){
+  const a=s.ageIndex||0,pop=settlementPopulation(s);
+  if(a>=1&&pop>=8)queueAdvancedBuilding("forge",12,5,2,0,s);
+  if(a>=3&&pop>=12)queueAdvancedBuilding("library",14,8,1,0,s);
+  if(a>=3&&pop>=14)queueAdvancedBuilding("guildhall",16,8,2,0,s);
+  if(a>=4&&pop>=16)queueAdvancedBuilding("factory",20,12,5,0,s);
+  if(a>=4&&pop>=18)queueAdvancedBuilding("powerplant",22,14,6,1,s);
+  if(a>=5&&pop>=20)queueAdvancedBuilding("lab",22,16,5,2,s);
+  if(a>=5&&pop>=22)queueAdvancedBuilding("hospital",20,14,4,1,s);
+  if(a>=6&&pop>=24)queueAdvancedBuilding("spaceport",32,24,12,5,s)
+}
+function updateSpaceProgram(s){
+  if((s.ageIndex||0)<6)return;
+  const port=buildingsOf("spaceport",true,s.id)[0];if(!port)return;
+  s.spaceProgram=s.spaceProgram||{missions:0,lastMissionDay:-999,moonLanded:false};
+  if(s.spaceProgram.moonLanded)return;
+  if(day-s.spaceProgram.lastMissionDay<22)return;
+  if((s.iron||0)<12||(s.gold||0)<4||s.food<18)return;
+  s.iron-=12;s.gold-=4;s.food-=18;s.spaceProgram.lastMissionDay=Math.floor(day);s.spaceProgram.missions++;
+  buildingHistoryAdd(port,`Launched lunar mission ${s.spaceProgram.missions}.`);
+  visualEffects.push({type:"rocket",x:port.x,y:port.y,start:visualTime,duration:4.6,seed:rnd(0,10)});
+  // First mature launch becomes the lunar landing milestone.
+  s.spaceProgram.moonLanded=true;
+  worldMilestones.moonLanding=true;worldMilestones.firstMoonSettlementId=s.id;worldMilestones.firstMoonDay=Math.floor(day);
+  addEvent(`${s.name} launched a crewed mission from ${port.name} and became the first civilization to land on the Moon.`,"space")
+}
 function settlementById(id){return settlements.find(s=>s.id===Number(id))||null}
 function kingdomById(id){return kingdoms.find(k=>k.id===Number(id))||null}
 function citizenSettlement(p){return settlementById(p?.settlementId)||settlement}
@@ -549,7 +745,10 @@ function createSettlement(name,x,y,founders=[],parentId=null){
     tech:new Set(parent?.tech||[]),births:0,deaths:0,foundedDay:Math.floor(day),parentId,leaderId:null,kingdomId:null,identity:settlementIdentity(founders),culture:"developing",
     cultureId:null,religionId:parent?.religionId||null,colorIndex:(nextSettlementId-2)%polityColors.length,territoryRadius:9,relations:{},lastExpansionDay:day,lastTradeDay:day,lastElectionDay:day,
     prosperity:50,warWeariness:0,divineImpressions:{},divineAttention:parent?(parent.divineAttention||0)*.25:0,creatorMercy:parent?(parent.creatorMercy||0)*.20:0,
-    creatorFear:parent?(parent.creatorFear||0)*.20:0,lastDivineDay:-999,market:null};
+    creatorFear:parent?(parent.creatorFear||0)*.20:0,lastDivineDay:-999,market:null,
+    ageIndex:parent?Math.max(0,(parent.ageIndex||0)-1):0,knowledge:parent?Math.max(10,(parent.knowledge||0)*.34):0,ageStartedDay:Math.floor(day),
+    ageHistory:[{day:Math.floor(day),age:parent?AGE_DEFS[Math.max(0,(parent.ageIndex||0)-1)].name:"Stone Age"}],
+    faithPolicy:"Tolerant",spaceProgram:{missions:0,lastMissionDay:-999,moonLanded:false}};
   settlements.push(s);
   s.cultureId=parent?.cultureId||createCulture(s,founders,null).id;s.culture=settlementCulture(s)?.name||"developing";ensureMarket(s);
   for(const p of founders){
@@ -1384,7 +1583,7 @@ function makePerson(name,x,y,sex,age,parents=[]){
     preferredJob:null,jobSince:day,careerChanges:0,bestFriendId:null,rivalId:null,
     settlementId:settlement?.id||1,originSettlementId:settlement?.id||1,citizenshipHistory:[],refugee:false,militaryRole:null,
     cultureId:settlement?.cultureId||null,religionId:settlement?.religionId||null,belief:rnd(18,68),faithStance:"Questioning",religiousRole:null,witnessedDivine:0,
-    economicRole:null,socialClass:"Commoner",tradeMission:null
+    economicRole:null,socialClass:"Commoner",tradeMission:null,culturalAttachment:rnd(.35,.95),pilgrimage:null,historicalTitle:null
   };
   p.faithStance=faithStance(p);
   p.preferredJob=age>=14?skillJobs.slice().sort((a,b)=>jobAffinity(p,b)-jobAffinity(p,a))[0]:null;
@@ -1429,9 +1628,53 @@ function moveCritterToward(c,t){
   for(const q of opts)if(passable(q[0],q[1])){c.dir=q[0]>=c.x?1:-1;c.x=q[0];c.y=q[1];return}
 }
 
+
+function buildingTypeLabel(type){return BUILDING_LABELS[type]||type[0].toUpperCase()+type.slice(1)}
+function buildingNameFor(type,s,id){
+  const root=buildingTypeLabel(type),age=s?ageDef(s).name:"Unknown Age";
+  if(type==="temple")return `${s?.name||"Settlement"} Great Temple`;
+  if(type==="library")return `${s?.name||"Settlement"} Archive`;
+  if(type==="spaceport")return `${s?.name||"Settlement"} Lunar Port`;
+  if(type==="market")return `${s?.name||"Settlement"} Market`;
+  return `${root} ${id}`
+}
+function buildingHistoryAdd(b,text,kind="history"){
+  if(!b)return;b.history=b.history||[];
+  b.history.unshift({day:Math.floor(day),text,kind});b.history=b.history.slice(0,40)
+}
+function buildingResidents(b){
+  return people.filter(p=>p.alive&&p.homeId===b.id)
+}
+function buildingWorkers(b){
+  const s=settlementById(b.settlementId);if(!s)return EMPTY_LIST;
+  if(b.type==="farm")return settlementPeople(s,true).filter(p=>p.job==="Farmer");
+  if(b.type==="mine")return settlementPeople(s,true).filter(p=>p.job==="Miner");
+  if(b.type==="workshop"||b.type==="forge"||b.type==="factory")return settlementPeople(s,true).filter(p=>p.job==="Builder"||p.job==="Miner");
+  if(b.type==="market")return settlementPeople(s,true).filter(p=>p.economicRole==="Merchant");
+  if(b.type==="shrine"||b.type==="temple")return settlementPeople(s,true).filter(p=>p.religiousRole);
+  if(b.type==="lab")return settlementPeople(s,true).filter(p=>(p.education||0)>60);
+  return EMPTY_LIST
+}
+function buildingConditionLabel(b){return b.condition>=85?"Excellent":b.condition>=65?"Good":b.condition>=40?"Worn":b.condition>=20?"Poor":"Critical"}
+function updateBuildingLife(){
+  for(const b of buildings){
+    if(!b.complete)continue;
+    const s=settlementById(b.settlementId),tile=idx(clamp(Math.round(b.x),0,WORLD_W-1),clamp(Math.round(b.y),0,WORLD_H-1));
+    const hazard=(burn[tile]||0)>100||terrain[tile]===T.LAVA;
+    b.condition=clamp((b.condition??100)-(hazard?.45:.0045),0,100);
+    if(hazard&&Math.random()<.04)buildingHistoryAdd(b,"The building was damaged by fire or extreme heat.","damage");
+    if(b.condition<48&&s&&Math.random()<.05){
+      const builders=settlementPeople(s,true).filter(p=>p.job==="Builder");
+      if(builders.length&&(s.wood||0)>=2){s.wood-=2;b.condition=clamp(b.condition+rnd(12,24),0,100);const p=builders[rndi(0,builders.length-1)];buildingHistoryAdd(b,`${p.name} repaired the structure.`,"repair")}
+    }
+  }
+}
 function addBuilding(type,x,y,complete=true,settlementId=null){
-  const sid=settlementId??settlement?.id??1;
-  const b={id:nextBuildingId++,type,x,y,complete,progress:complete?100:0,age:0,smoke:rnd(0,6.28),crop:0,harvest:0,settlementId:sid};
+  const sid=settlementId??settlement?.id??1,s=settlementById(sid)||settlement,id=nextBuildingId++;
+  const b={id,type,x,y,complete,progress:complete?100:0,age:0,smoke:rnd(0,6.28),crop:0,harvest:0,settlementId:sid,
+    name:buildingNameFor(type,s,id),builtDay:complete?Math.floor(day):null,startedDay:Math.floor(day),builderId:null,
+    builtAgeIndex:s?.ageIndex||0,history:[],condition:100,upgradeLevel:0,ownerFamily:null};
+  buildingHistoryAdd(b,complete?`The ${buildingTypeLabel(type)} entered service.`:`Construction began during the ${ageName(s)}.`,"construction");
   buildings.push(b);invalidateWorldIndex();invalidateBuildingOrder();return b
 }
 function buildingsOf(type,completeOnly=true,sid=null){
@@ -1627,7 +1870,7 @@ function workMinerUnderground(p){
   p.carryAmount=1+(Math.random()<skillLevel(p,"Miner")/170?1:0);gainSkill(p,"Miner",.15);rewardWork(p,.07);underground[i]=U.CAVE;undergroundDirty=true;spawnParticles("stone",p.x,p.y,5);return true
 }
 function workPerson(p){const s=citizenSettlement(p);if(!s)return false;if(p.job==="Miner"&&buildingsOf("mine",true,p.settlementId).length)return workMinerUnderground(p);if(p.carryAmount>0&&p.carryType)return deliver(p);
-  if(p.job==="Builder"){const site=buildings.find(b=>!b.complete&&b.settlementId===p.settlementId);if(site){p.goal=`Build ${site.type}`;if(!atTarget(p,site,1.6)){moveToward(p,site);return true}site.progress+=1.35*workEfficiency(p,"Builder");gainSkill(p,"Builder",.10);rewardWork(p,.035);spawnParticles("dust",site.x,site.y,2);if(site.progress>=100){site.progress=100;site.complete=true;invalidateWorldIndex();addEvent(`${p.name} completed the ${site.type}.`,"building");if(site.type==="hut"){discover("Shelter",`${s.name} mastered permanent shelter.`,s);assignHomes()}if(site.type==="stockpile")discover("Storage",`${s.name} established shared storage.`,s);if(site.type==="farm")discover("Agriculture",`${s.name} prepared its first permanent fields.`,s);if(site.type==="granary")discover("Granaries",`${s.name} completed a granary to protect its harvest.`,s);if(site.type==="mine"){discover("Mining",`${s.name} opened its first mine shaft.`,s);openMineShaft(site)}}return true}}
+  if(p.job==="Builder"){const site=buildings.find(b=>!b.complete&&b.settlementId===p.settlementId);if(site){p.goal=`Build ${site.type}`;if(!atTarget(p,site,1.6)){moveToward(p,site);return true}site.progress+=1.35*workEfficiency(p,"Builder");gainSkill(p,"Builder",.10);rewardWork(p,.035);spawnParticles("dust",site.x,site.y,2);if(site.progress>=100){site.progress=100;site.complete=true;site.builtDay=Math.floor(day);site.builderId=p.id;site.builtAgeIndex=s.ageIndex||0;buildingHistoryAdd(site,`${p.name} completed ${site.name} during the ${ageName(s)}.`,"completion");invalidateWorldIndex();addEvent(`${p.name} completed ${site.name}.`,"building");if(site.type==="hut"){discover("Shelter",`${s.name} mastered permanent shelter.`,s);assignHomes()}if(site.type==="stockpile")discover("Storage",`${s.name} established shared storage.`,s);if(site.type==="farm")discover("Agriculture",`${s.name} prepared its first permanent fields.`,s);if(site.type==="granary")discover("Granaries",`${s.name} completed a granary to protect its harvest.`,s);if(site.type==="mine"){discover("Mining",`${s.name} opened its first mine shaft.`,s);openMineShaft(site)}}return true}}
   if(p.job==="Farmer"){const f=findFarmWork(p);if(f){p.goal="Tend fields";if(!atTarget(p,f,2)){moveToward(p,f);return true}if(f.crop>=100){p.carryType="food";p.carryAmount=5+Math.floor(skillLevel(p,"Farmer")/35);f.crop=8;gainSkill(p,"Farmer",.18);rewardWork(p,.06);spawnParticles("grain",f.x,f.y,8);return true}if(f.crop<15)f.crop=18;gainSkill(p,"Farmer",.035);return true}}
   if(p.job==="Miner"){const target=cachedNearestTile(p,"surfaceMine",(i)=>rocks[i]>0||iron[i]>0||gold[i]>0,34,30);if(target){p.goal="Mine minerals";if(!atTarget(p,target,1)){moveToward(p,target);return true}const i=idx(target.x,target.y);if(gold[i]>0){gold[i]--;p.carryType="gold"}else if(iron[i]>0){iron[i]--;p.carryType="iron"}else{rocks[i]--;p.carryType="stone"}p.carryAmount=1+(Math.random()<skillLevel(p,"Miner")/180?1:0);clearCachedTile(p,"surfaceMine");gainSkill(p,"Miner",.14);rewardWork(p,.06);spawnParticles("stone",p.x,p.y,5);return true}}
   if(p.job==="Woodcutter"){const target=cachedNearestTile(p,"wood",(i)=>trees[i]>0,34,36);if(target){p.goal="Cut wood";if(!atTarget(p,target,1)){moveToward(p,target);return true}const i=idx(target.x,target.y);trees[i]--;clearCachedTile(p,"wood");p.carryType="wood";p.carryAmount=1+(Math.random()<skillLevel(p,"Woodcutter")/150?1:0);gainSkill(p,"Woodcutter",.13);rewardWork(p,.045);spawnParticles("leaf",p.x,p.y,6);return true}}
@@ -1745,6 +1988,7 @@ function think(p){if(!p.alive)return;p.px+=(p.x-p.px)*.23;p.py+=(p.y-p.py)*.23;p
   if(p.energy<22){p.goal="Rest";p.mood="Tired";const home=nearestBuilding(p,"hut")||nearestBuilding(p,"firepit");if(home&&!atTarget(p,home,2))moveToward(p,home);else p.energy=clamp(p.energy+.8,0,100);return}
   if(p.age<14){p.job="Child";teachChild(p);const home=homeFor(p)||nearestBuilding(p,"hut")||nearestBuilding(p,"firepit");p.goal=p.education<55?"Learn and stay near home":"Explore near home";if(home&&Math.hypot(p.x-home.x,p.y-home.y)>7)moveToward(p,home);else if(Math.random()<.08+(p.traits?.curiosity||.5)*.03)wander(p);return}
   if(p.age<18){teachChild(p);if(p.job==="Child")p.job=p.preferredJob||"Gatherer"}
+  if(pilgrimageTravel(p))return;
   if(merchantTravel(p))return;
   if(aiSocialize(p))return;
   p.mood=p.stress>65?"Stressed":"Focused";workPerson(p);
@@ -1752,9 +1996,10 @@ function think(p){if(!p.alive)return;p.px+=(p.x-p.px)*.23;p.py+=(p.y-p.py)*.23;p
 
 function findBuildSite(type,s=settlement){
   if(!s)return null;const cx=s.x,cy=s.y;
-  for(let r=4;r<25;r+=2)for(let n=0;n<26;n++){
-    const a=(n/26)*Math.PI*2+rnd(-.08,.08),x=Math.round(cx+Math.cos(a)*r),y=Math.round(cy+Math.sin(a)*r);
-    if(!passable(x,y)||buildingAt(x,y,type==="farm"?5:4))continue;
+  const spacing=type==="farm"?2.8:type==="spaceport"?4.2:2.15;
+  for(let r=3;r<24;r+=1.45)for(let n=0;n<34;n++){
+    const a=(n/34)*Math.PI*2+rnd(-.07,.07),x=Math.round(cx+Math.cos(a)*r),y=Math.round(cy+Math.sin(a)*r);
+    if(!passable(x,y)||buildingAt(x,y,spacing))continue;
     const t=terrain[idx(x,y)];if(type==="farm"&&(t!==T.GRASS&&t!==T.FOREST))continue;if(type!=="farm"&&t===T.SAND)continue;
     return{x,y}
   }
@@ -1764,26 +2009,29 @@ function queueBuilding(type,wood,stone=0,s=settlement){
   if(!s||buildings.some(b=>b.settlementId===s.id&&b.type===type&&!b.complete))return false;
   if((s.wood||0)<wood||(s.stone||0)<stone)return false;
   const site=findBuildSite(type,s);if(!site)return false;
-  s.wood-=wood;s.stone-=stone;addBuilding(type,site.x,site.y,false,s.id);
-  addEvent(`${s.name} began construction of a ${type}.`,"building");return true
+  s.wood-=wood;s.stone-=stone;const b=addBuilding(type,site.x,site.y,false,s.id);
+  buildingHistoryAdd(b,`${s.name} committed ${wood} wood and ${stone} stone to construction.`);
+  addEvent(`${s.name} began construction of ${b.name}.`,"building");return true
 }
 function planVillage(s=settlement){
   if(!s)return;const pop=settlementPopulation(s),local=settlementBuildings(s,false),huts=local.filter(b=>b.complete&&b.type==="hut").length,farms=local.filter(b=>b.complete&&b.type==="farm").length;
-  if(huts<Math.ceil(Math.max(2,pop)/4))queueBuilding("hut",8,0,s);
-  if(day-s.foundedDay>2&&!local.some(b=>b.type==="stockpile"))queueBuilding("stockpile",10,0,s);
-  if(hasTech("Storage",s)&&day-s.foundedDay>6&&!hasTech("Agriculture",s)&&s.food>=10)discover("Agriculture",`${s.name} began saving seed for permanent fields.`,s);
-  if(hasTech("Agriculture",s)&&farms<Math.max(1,Math.ceil(pop/6)))queueBuilding("farm",6,0,s);
+  // Smaller world objects let housing become denser, so communities can build more homes.
+  if(huts<Math.ceil(Math.max(2,pop)/3))queueBuilding("hut",6,0,s);
+  if(day-s.foundedDay>2&&!local.some(b=>b.type==="stockpile"))queueBuilding("stockpile",8,0,s);
+  if(hasTech("Storage",s)&&day-s.foundedDay>5&&!hasTech("Agriculture",s)&&s.food>=9)discover("Agriculture",`${s.name} began saving seed for permanent fields.`,s);
+  if(hasTech("Agriculture",s)&&farms<Math.max(1,Math.ceil(pop/7)))queueBuilding("farm",5,0,s);
   if(pop>=6&&!hasTech("Village Planning",s))discover("Village Planning",`${s.name} began organizing itself as a true village.`,s);
-  if(day-s.foundedDay>12&&s.wood>=15&&!hasTech("Stoneworking",s))discover("Stoneworking",`${s.name} learned to shape stone.`,s);
-  if(hasTech("Stoneworking",s)&&pop>=5&&!local.some(b=>b.type==="mine"))queueBuilding("mine",10,2,s);
-  if(hasTech("Stoneworking",s)&&pop>=7&&!local.some(b=>b.type==="workshop"))queueBuilding("workshop",12,5,s);
-  if(pop>=8&&hasTech("Agriculture",s)&&!local.some(b=>b.type==="granary"))queueBuilding("granary",14,2,s);
+  if(day-s.foundedDay>10&&s.wood>=12&&!hasTech("Stoneworking",s))discover("Stoneworking",`${s.name} learned to shape stone.`,s);
+  if(hasTech("Stoneworking",s)&&pop>=5&&!local.some(b=>b.type==="mine"))queueBuilding("mine",9,2,s);
+  if(hasTech("Stoneworking",s)&&pop>=7&&!local.some(b=>b.type==="workshop"))queueBuilding("workshop",10,4,s);
+  if(pop>=8&&hasTech("Agriculture",s)&&!local.some(b=>b.type==="granary"))queueBuilding("granary",11,2,s);
   const route=tradeRoutes.some(r=>r.aId===s.id||r.bId===s.id);
-  if(pop>=7&&!local.some(b=>b.type==="market")&&(route||day-s.foundedDay>20))queueBuilding("market",10,2,s);
+  if(pop>=7&&!local.some(b=>b.type==="market")&&(route||day-s.foundedDay>18))queueBuilding("market",9,2,s);
   const rel=settlementReligion(s),followers=rel?religionFollowers(rel):0;
-  if(rel&&followers>=4&&!local.some(b=>b.type==="shrine"))queueBuilding("shrine",8,2,s);
-  if(rel&&followers>=12&&rel.prestige>=18&&!local.some(b=>b.type==="temple"))queueBuilding("temple",18,8,s);
-  if(!hasTech("Roads",s)){let found=false;for(let n=0;n<250;n++){const i=rndi(0,N-1);if(trail[i]>90){found=true;break}}if(found)discover("Roads",`${s.name}'s repeated foot traffic hardened into permanent paths.`,s)}
+  if(rel&&followers>=4&&!local.some(b=>b.type==="shrine"))queueBuilding("shrine",7,2,s);
+  if(rel&&followers>=12&&rel.prestige>=18&&!local.some(b=>b.type==="temple"))queueBuilding("temple",14,6,s);
+  if(!hasTech("Roads",s)){let found=false;for(let n=0;n<180;n++){const i=rndi(0,N-1);if(trail[i]>90){found=true;break}}if(found)discover("Roads",`${s.name}'s repeated foot traffic hardened into permanent paths.`,s)}
+  updateAgeConstruction(s)
 }
 function updateFarms(){for(const f of buildingsOf("farm")){const i=idx(clamp(Math.round(f.x),0,WORLD_W-1),clamp(Math.round(f.y),0,WORLD_H-1));const rain=wet[i]>0?1.7:1;f.crop=clamp(f.crop+.045*rain,0,100)}}
 function consumeSettlement(){
@@ -1813,6 +2061,8 @@ function simulate(){
     if(tick%380===69)updateCultures();
     if(tick%380===169)updateReligions();
     if(tick%380===269)updateEconomy();
+    if(tick%440===321)updateAges();
+    if(tick%900===511)updateBuildingLife();
 
     if(tick%280===143){
       for(let n=0;n<280;n++){
@@ -1880,9 +2130,9 @@ function generate(useExistingSeed=false){
   if(best){sx=best.x;sy=best.y}
   paint(sx,sy,Math.max(11,Math.min(25,Math.round(WORLD_W*.10))),"land",false);
 
-  nextPersonId=1;nextBuildingId=1;nextCritterId=1;nextSettlementId=1;nextKingdomId=1;nextWarId=1;nextCultureId=1;nextReligionId=1;nextHolySiteId=1;
+  nextPersonId=1;nextBuildingId=1;nextCritterId=1;nextSettlementId=1;nextKingdomId=1;nextWarId=1;nextCultureId=1;nextReligionId=1;nextHolySiteId=1;nextChronicleId=1;
   usedNames.clear();usedFirstNames.clear();
-  people=[];settlements=[];kingdoms=[];wars=[];tradeRoutes=[];cultures=[];religions=[];holySites=[];divineChronicle=[];settlement=null;atlasMode="political";worldIndexDirty=true;buildingOrderDirty=true;
+  people=[];settlements=[];kingdoms=[];wars=[];tradeRoutes=[];cultures=[];religions=[];holySites=[];divineChronicle=[];chronicles=[];settlement=null;atlasMode="political";worldMilestones={moonLanding:false,firstMoonSettlementId:null,firstMoonDay:null};worldIndexDirty=true;buildingOrderDirty=true;
 
   const startPop=configValue("startPopulation");
   for(let n=0;n<startPop;n++){
@@ -2073,7 +2323,7 @@ function ensureTreeSprites(){
   treeSpriteCache={pine:[makeTreeSprite("pine",0),makeTreeSprite("pine",1)],broad:[makeTreeSprite("broad",0),makeTreeSprite("broad",1)],clump:[makeTreeSprite("clump",0),makeTreeSprite("clump",1)]}
 }
 function drawCachedTreeSprite(x,y,kind){
-  ensureTreeSprites();const j=treeJitter(x,y),s=worldToScreen(x+.5+j.x,y+.63+j.y),base=clamp(cameraScale(),2.2,13)*j.scale;
+  ensureTreeSprites();const j=treeJitter(x,y),s=worldToScreen(x+.5+j.x,y+.63+j.y),base=clamp(cameraScale(),2.2,13)*j.scale*.76;
   const variant=hash(x,y,worldSeed+1901)>.5?1:0,sprite=treeSpriteCache[kind][variant],sway=Math.sin(visualTime*.72+x*.29+y*.17)*base*.045;
   const w=kind==="clump"?base*1.65:base*1.75,h=kind==="clump"?base*1.65:base*2.05;
   ctx.drawImage(sprite,s.x-w/2+sway,s.y-h*.76,w,h)
@@ -2116,15 +2366,68 @@ function drawTerrainFeatures(){
   }
 }
 function drawFarm(b){
-  const s=worldToScreen(b.x,b.y),z=clamp(cameraScale(),3,12),growth=b.crop/100;
+  const s=worldToScreen(b.x,b.y),z=clamp(cameraScale(),3,12)*.58,growth=b.crop/100;
   ctx.fillStyle='rgba(0,0,0,.16)';ctx.beginPath();ctx.ellipse(s.x,s.y+z*.78,z*2.46,z*.88,0,0,Math.PI*2);ctx.fill();
   const soil=ctx.createLinearGradient(s.x,s.y-z*1.4,s.x,s.y+z*1.4);soil.addColorStop(0,'#93673a');soil.addColorStop(1,'#6b4b29');
   ctx.fillStyle=soil;ctx.beginPath();if(ctx.roundRect)ctx.roundRect(s.x-z*2.05,s.y-z*1.10,z*4.1,z*2.32,z*.14);else ctx.rect(s.x-z*2.05,s.y-z*1.10,z*4.1,z*2.32);ctx.fill();
   ctx.strokeStyle='rgba(222,188,122,.60)';ctx.lineWidth=Math.max(1,z*.07);for(let r=-1;r<=1;r++){ctx.beginPath();ctx.moveTo(s.x-z*1.86,s.y+r*z*.56);ctx.lineTo(s.x+z*1.86,s.y+r*z*.56);ctx.stroke()}
   if(growth>.10){ctx.strokeStyle=growth>.78?'#debf63':growth>.45?'#7fb65a':'#5f9748';ctx.lineWidth=Math.max(1,z*.10);for(let r=-1;r<=1;r++)for(let n=-3;n<=3;n++){const xx=s.x+n*z*.48+(r%2)*z*.08,yy=s.y+r*z*.56;ctx.beginPath();ctx.moveTo(xx,yy+z*.12);ctx.lineTo(xx-z*.04,yy-z*(.10+.52*growth));ctx.moveTo(xx,yy+z*.12);ctx.lineTo(xx+z*.04,yy-z*(.12+.56*growth));ctx.stroke()}}
 }
+
+function drawPrimitiveHome(b,s,z){
+  ctx.fillStyle="rgba(0,0,0,.20)";ctx.beginPath();ctx.ellipse(s.x,s.y+z*.82,z*1.10,z*.28,0,0,Math.PI*2);ctx.fill();
+  const hide=["#8b6745","#735237","#9a7650"][b.id%3];
+  ctx.fillStyle=hide;ctx.beginPath();ctx.moveTo(s.x-z*1.05,s.y+z*.60);ctx.lineTo(s.x,s.y-z*1.28);ctx.lineTo(s.x+z*1.05,s.y+z*.60);ctx.closePath();ctx.fill();
+  ctx.strokeStyle="#4f3828";ctx.lineWidth=Math.max(1,z*.10);ctx.beginPath();ctx.moveTo(s.x,s.y-z*1.22);ctx.lineTo(s.x,s.y+z*.64);ctx.stroke();
+  ctx.fillStyle="#33241d";ctx.beginPath();ctx.moveTo(s.x-z*.20,s.y+z*.59);ctx.lineTo(s.x,s.y+z*.05);ctx.lineTo(s.x+z*.20,s.y+z*.59);ctx.fill()
+}
+function drawAdvancedBuilding(b){
+  const s=worldToScreen(b.x,b.y),z=clamp(cameraScale(),3,12)*.62,c=settlementCulture(settlementById(b.settlementId)),accent=c?cultureColor(c,1):"#879a7a";
+  ctx.fillStyle="rgba(0,0,0,.19)";ctx.beginPath();ctx.ellipse(s.x,s.y+z*.95,z*1.35,z*.31,0,0,Math.PI*2);ctx.fill();
+
+  if(b.type==="forge"){
+    ctx.fillStyle="#65564a";ctx.fillRect(s.x-z*1.05,s.y-z*.46,z*2.10,z*1.32);
+    ctx.fillStyle="#404447";ctx.beginPath();ctx.moveTo(s.x-z*1.20,s.y-z*.43);ctx.lineTo(s.x,s.y-z*1.16);ctx.lineTo(s.x+z*1.20,s.y-z*.43);ctx.fill();
+    ctx.fillStyle="#db772e";ctx.fillRect(s.x-z*.50,s.y+z*.12,z*.48,z*.38);ctx.fillStyle="#3d3833";ctx.fillRect(s.x+z*.52,s.y-z*.74,z*.22,z*.74);return
+  }
+  if(b.type==="library"||b.type==="guildhall"){
+    ctx.fillStyle=b.type==="library"?"#a99878":"#92765b";ctx.fillRect(s.x-z*1.22,s.y-z*.50,z*2.44,z*1.52);
+    ctx.fillStyle=accent;ctx.beginPath();ctx.moveTo(s.x-z*1.42,s.y-z*.48);ctx.lineTo(s.x,s.y-z*1.40);ctx.lineTo(s.x+z*1.42,s.y-z*.48);ctx.fill();
+    ctx.fillStyle="#49392f";ctx.fillRect(s.x-z*.22,s.y+z*.20,z*.44,z*.80);
+    if(b.type==="library"){ctx.fillStyle="#d7ca9e";for(let n=-1;n<=1;n++)ctx.fillRect(s.x+n*z*.52-z*.12,s.y-z*.20,z*.24,z*.28)}
+    return
+  }
+  if(b.type==="factory"){
+    ctx.fillStyle="#767b79";ctx.fillRect(s.x-z*1.38,s.y-z*.38,z*2.76,z*1.28);ctx.fillStyle="#555b5c";ctx.fillRect(s.x-z*.95,s.y-z*1.05,z*.32,z*.74);
+    ctx.fillStyle="#aeb4b2";for(let n=-1;n<=1;n++)ctx.fillRect(s.x+n*z*.67-z*.20,s.y,z*.40,z*.28);ctx.fillStyle=accent;ctx.fillRect(s.x-z*1.38,s.y-z*.38,z*2.76,z*.16);return
+  }
+  if(b.type==="powerplant"){
+    ctx.fillStyle="#667276";ctx.fillRect(s.x-z*1.25,s.y-z*.44,z*2.50,z*1.40);
+    ctx.fillStyle="#3d484c";ctx.beginPath();ctx.moveTo(s.x-z*1.38,s.y-z*.42);ctx.lineTo(s.x,s.y-z*1.14);ctx.lineTo(s.x+z*1.38,s.y-z*.42);ctx.fill();
+    ctx.fillStyle="#e0b650";ctx.beginPath();ctx.arc(s.x,s.y+z*.15,z*.28,0,Math.PI*2);ctx.fill();ctx.fillStyle="#f4dc82";ctx.beginPath();ctx.arc(s.x,s.y+z*.15,z*.11,0,Math.PI*2);ctx.fill();return
+  }
+  if(b.type==="lab"||b.type==="hospital"){
+    ctx.fillStyle="#d1d6d4";ctx.fillRect(s.x-z*1.26,s.y-z*.54,z*2.52,z*1.52);
+    ctx.fillStyle=b.type==="hospital"?"#b95c5c":accent;ctx.fillRect(s.x-z*1.26,s.y-z*.54,z*2.52,z*.24);
+    ctx.fillStyle="#62777b";for(let n=-1;n<=1;n++)ctx.fillRect(s.x+n*z*.62-z*.18,s.y-z*.12,z*.36,z*.32);
+    if(b.type==="hospital"){ctx.fillStyle="#b94e4e";ctx.fillRect(s.x-z*.09,s.y+z*.18,z*.18,z*.52);ctx.fillRect(s.x-z*.26,s.y+z*.35,z*.52,z*.18)}
+    return
+  }
+  if(b.type==="spaceport"){
+    ctx.fillStyle="#7b8285";ctx.fillRect(s.x-z*1.45,s.y+z*.15,z*2.90,z*.65);ctx.fillStyle="#4d5a61";ctx.beginPath();ctx.arc(s.x,s.y+z*.18,z*.76,Math.PI,0);ctx.fill();
+    ctx.fillStyle="#e8ecea";ctx.beginPath();ctx.moveTo(s.x,s.y-z*1.58);ctx.lineTo(s.x-z*.27,s.y-z*.55);ctx.lineTo(s.x-z*.20,s.y+z*.06);ctx.lineTo(s.x+z*.20,s.y+z*.06);ctx.lineTo(s.x+z*.27,s.y-z*.55);ctx.closePath();ctx.fill();
+    ctx.fillStyle=accent;ctx.fillRect(s.x-z*.20,s.y-z*.46,z*.40,z*.38);ctx.fillStyle="#d06c3f";ctx.beginPath();ctx.moveTo(s.x-z*.15,s.y+z*.05);ctx.lineTo(s.x,s.y+z*.58);ctx.lineTo(s.x+z*.15,s.y+z*.05);ctx.fill();return
+  }
+}
+function drawBuildingCultureAccent(b){
+  if(!b.complete||["farm","firepit","mine","spaceport"].includes(b.type))return;
+  const s0=settlementById(b.settlementId),c=settlementCulture(s0);if(!c)return;
+  const p=worldToScreen(b.x,b.y),z=clamp(cameraScale(),3,12)*.62;
+  ctx.fillStyle=cultureColor(c,.85);ctx.fillRect(p.x+z*.72,p.y-z*.82,z*.13,z*.55);
+  ctx.beginPath();ctx.moveTo(p.x+z*.85,p.y-z*.80);ctx.lineTo(p.x+z*1.25,p.y-z*.67);ctx.lineTo(p.x+z*.85,p.y-z*.52);ctx.fill()
+}
 function drawV10Building(b){
-  const s=worldToScreen(b.x,b.y),z=clamp(cameraScale(),3,12);ctx.fillStyle="rgba(0,0,0,.22)";ctx.beginPath();ctx.ellipse(s.x+z*.10,s.y+z*1.05,z*1.55,z*.34,0,0,Math.PI*2);ctx.fill();
+  const s=worldToScreen(b.x,b.y),z=clamp(cameraScale(),3,12)*.62;ctx.fillStyle="rgba(0,0,0,.22)";ctx.beginPath();ctx.ellipse(s.x+z*.10,s.y+z*1.05,z*1.55,z*.34,0,0,Math.PI*2);ctx.fill();
   if(b.type==="market"){
     ctx.fillStyle="#8f6843";ctx.fillRect(s.x-z*1.35,s.y-z*.32,z*2.70,z*1.20);ctx.fillStyle="#d8b65f";ctx.beginPath();ctx.moveTo(s.x-z*1.55,s.y-z*.28);ctx.lineTo(s.x,s.y-z*1.25);ctx.lineTo(s.x+z*1.55,s.y-z*.28);ctx.fill();
     for(let n=-1;n<=1;n++){ctx.fillStyle=["#b85e51","#e0c16c","#668d77"][n+1];ctx.fillRect(s.x+n*z*.62-z*.22,s.y+z*.02,z*.44,z*.30)}return
@@ -2138,8 +2441,10 @@ function drawV10Building(b){
     ctx.fillStyle="#655d53";for(let n=-1;n<=1;n++)ctx.fillRect(s.x+n*z*.58-z*.09,s.y-z*.12,z*.18,z*1.08);ctx.fillStyle="#efd36e";ctx.beginPath();ctx.arc(s.x,s.y-z*.86,z*.14,0,Math.PI*2);ctx.fill();return
   }
 }function drawBuilding(b){
-  const s=worldToScreen(b.x,b.y),z=clamp(cameraScale(),3,12);
+  const s=worldToScreen(b.x,b.y),z=clamp(cameraScale(),3,12)*.62;
   if(b.type==='farm'){drawFarm(b);return}
+  if(['forge','library','guildhall','factory','powerplant','lab','hospital','spaceport'].includes(b.type)){drawAdvancedBuilding(b);return}
+  if(b.type==='hut'&&(b.builtAgeIndex||0)===0){drawPrimitiveHome(b,s,z);return}
   if(b.type==='market'||b.type==='shrine'||b.type==='temple'){drawV10Building(b);return}
   if(!b.complete){ctx.fillStyle='rgba(0,0,0,.18)';ctx.beginPath();ctx.ellipse(s.x,s.y+z*1.18,z*1.8,z*.42,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='rgba(101,73,45,.78)';ctx.fillRect(s.x-z*1.15,s.y-z*.40,z*2.3,z*1.35);ctx.strokeStyle='#d6b77a';ctx.lineWidth=Math.max(1,z*.12);ctx.strokeRect(s.x-z*1.45,s.y-z*.86,z*2.9,z*2.2);ctx.fillStyle='rgba(255,255,255,.22)';ctx.fillRect(s.x-z*1.18,s.y+z*1.02,z*2.36,z*.20);ctx.fillStyle='#7ccb73';ctx.fillRect(s.x-z*1.18,s.y+z*1.02,z*2.36*(b.progress/100),z*.20);return}
   ctx.fillStyle='rgba(0,0,0,.23)';ctx.beginPath();ctx.ellipse(s.x+z*.12,s.y+z*1.24,z*1.75,z*.44,0,0,Math.PI*2);ctx.fill();
@@ -2152,8 +2457,9 @@ function drawV10Building(b){
 }
 function drawPerson(p){
   if(!p.alive)return;
-  const s=worldToScreen(p.px,p.py),base=clamp(cameraScale(),3,14),child=p.age<14,z=base*(child?.70:1),bob=Math.sin(p.phase)*z*.07;
-  const skins=["#f1c494","#dca372","#be7e56","#7d4d36"],tunics=["#5d819d","#828a53","#83654c","#75649a","#4f816d","#a06f5d"],hairs=["#251d1a","#5c3f2b","#1b1a19","#8a6739","#6a2f29"];
+  const s=worldToScreen(p.px,p.py),base=clamp(cameraScale(),3,14),child=p.age<14,z=base*(child?.70:1)*.72,bob=Math.sin(p.phase)*z*.07;
+  const skins=["#f1c494","#dca372","#be7e56","#7d4d36"],ageIdx=citizenSettlement(p)?.ageIndex||0,cultTone=p.cultureId?cultureColor(cultureById(p.cultureId),1):null,
+  tunics=ageIdx===0?["#6c4d34","#79583b","#60432e","#866143","#725039","#5c3f2e"]:["#5d819d","#828a53","#83654c","#75649a","#4f816d","#a06f5d"],hairs=["#251d1a","#5c3f2b","#1b1a19","#8a6739","#6a2f29"];
   ctx.fillStyle="rgba(0,0,0,.18)";ctx.beginPath();ctx.ellipse(s.x+z*.08,s.y+z*1.06,z*.57,z*.17,0,0,Math.PI*2);ctx.fill();
 
   ctx.strokeStyle=skins[p.skin];ctx.lineWidth=Math.max(1,z*.075);
@@ -2162,7 +2468,7 @@ function drawPerson(p){
   ctx.moveTo(s.x+z*.13,s.y+z*.67+bob);ctx.lineTo(s.x+z*.16,s.y+z*1.05+bob);
   ctx.stroke();
 
-  const body=ctx.createLinearGradient(s.x,s.y-z*.12,s.x,s.y+z*.82);body.addColorStop(0,tunics[p.shirt]);body.addColorStop(1,"rgba(30,25,25,.20)");
+  const body=ctx.createLinearGradient(s.x,s.y-z*.12,s.x,s.y+z*.82);body.addColorStop(0,(cultTone&&ageIdx>0&&p.shirt%2===0)?cultTone:tunics[p.shirt]);body.addColorStop(1,"rgba(30,25,25,.20)");
   ctx.fillStyle=body;ctx.beginPath();
   ctx.moveTo(s.x-z*.31,s.y-z*.02+bob);ctx.quadraticCurveTo(s.x,s.y-z*.15+bob,s.x+z*.31,s.y-z*.02+bob);
   ctx.lineTo(s.x+z*.22,s.y+z*.72+bob);ctx.lineTo(s.x-z*.22,s.y+z*.72+bob);ctx.closePath();ctx.fill();
@@ -2275,7 +2581,7 @@ function drawPoliticalLayer(){
   ctx.restore()
 }
 function drawCritter(c){
-  const s=worldToScreen(c.px,c.py),base=clamp(cameraScale(),2.8,12),z=base*.88,bob=Math.sin(c.phase*1.15)*z*.045,dir=c.dir||1;
+  const s=worldToScreen(c.px,c.py),base=clamp(cameraScale(),2.8,12),z=base*.52,bob=Math.sin(c.phase*1.15)*z*.045,dir=c.dir||1;
   ctx.fillStyle="rgba(0,0,0,.16)";ctx.beginPath();ctx.ellipse(s.x+z*.05,s.y+z*.48,z*.58,z*.14,0,0,Math.PI*2);ctx.fill();
 
   if(c.type==="sheep"){
@@ -2404,6 +2710,14 @@ function drawTransientEffects(){
 
       ctx.fillStyle=`rgba(255,239,153,${.24+.50*alpha})`;ctx.beginPath();ctx.arc(s.x,s.y,z*(.34+.22*alpha),0,Math.PI*2);ctx.fill();
       flash=Math.max(flash,.18*alpha)
+    }else if(e.type==="rocket"){
+      const a=1-p,launch=Math.min(1,p*1.35),rise=canvas.height*.72*launch,rx=s.x,ry=s.y-rise;
+      ctx.save();
+      ctx.fillStyle=`rgba(240,244,244,${a})`;ctx.beginPath();ctx.moveTo(rx,ry-z*1.4);ctx.lineTo(rx-z*.28,ry-z*.25);ctx.lineTo(rx-z*.20,ry+z*.62);ctx.lineTo(rx+z*.20,ry+z*.62);ctx.lineTo(rx+z*.28,ry-z*.25);ctx.closePath();ctx.fill();
+      ctx.fillStyle="#6f8f9b";ctx.fillRect(rx-z*.18,ry-z*.34,z*.36,z*.34);
+      ctx.fillStyle=`rgba(255,174,72,${a})`;ctx.beginPath();ctx.moveTo(rx-z*.16,ry+z*.58);ctx.lineTo(rx,ry+z*(1.6+p*1.2));ctx.lineTo(rx+z*.16,ry+z*.58);ctx.fill();
+      ctx.fillStyle=`rgba(225,230,226,${a*.40})`;for(let n=0;n<5;n++){ctx.beginPath();ctx.arc(rx+Math.sin(e.seed+n*2.1)*z*.5,ry+z*(1.2+n*.45),z*(.25+n*.11),0,Math.PI*2);ctx.fill()}
+      ctx.restore()
     }else if(e.type==="fireBurst"){
       const a=(1-p),r=z*e.r*(.25+.75*p);
       ctx.strokeStyle=`rgba(255,145,45,${.30*a})`;ctx.lineWidth=Math.max(1,z*.08);
@@ -2425,7 +2739,7 @@ function drawLighting(){
 function inVisibleBounds(x,y,b,pad=3){return x>=b.l-pad&&x<=b.r+pad&&y>=b.t-pad&&y<=b.b+pad}
 function drawSurfaceEntities(){
   const b=visibleBounds(5),z=cameraScale();
-  for(const building of getSortedBuildings())if(inVisibleBounds(building.x,building.y,b,5))drawBuilding(building);
+  for(const building of getSortedBuildings())if(inVisibleBounds(building.x,building.y,b,5)){drawBuilding(building);drawBuildingCultureAccent(building)}
   const visibleCritters=[];for(const c of critters)if(c.alive&&inVisibleBounds(c.px,c.py,b,4))visibleCritters.push(c);
   if(z>3.4)visibleCritters.sort((a,b)=>a.py-b.py);
   for(const c of visibleCritters)drawCritter(c);
@@ -2448,11 +2762,47 @@ function render(){
   drawOrganicLandOverlay();drawCoastalBlend();drawSurfaceAtmosphere();drawWater();if(settings.trails)drawTrails();drawPoliticalLayer();drawGroundDetails();drawHazards();drawTerrainFeatures();drawSurfaceEntities();
   if(settings.effects){drawParticles();drawTransientEffects()}drawClouds();drawLighting();drawVignette();drawMiniMap()
 }
-function eraName(){const pop=people.filter(p=>p.alive).length;if(pop>=18)return"Village";if(pop>=10)return"Hamlet";if(pop>=5)return"Growing Camp";if(buildingsOf("hut").length)return"Early Settlement";return"Primitive"}
+function eraName(){return AGE_DEFS[worldHighestAgeIndex()].name}
 function jobCounts(){const c={};for(const p of people.filter(p=>p.alive)){c[p.job]=(c[p.job]||0)+1}return c}
 function renderCivilization(){if(!settlement)return;const counts=jobCounts(),complete=buildings.filter(b=>b.complete),pending=buildings.filter(b=>!b.complete);settlementNameEl.textContent=settlement.name;settlementEraEl.textContent=`${eraName()} · Day ${Math.floor(day)}`;civBody.innerHTML=`<div class="sectionTitle">Stockpile</div><div class="resourceGrid"><div class="resourceCard">🍎 Food<b>${Math.floor(settlement.food)}</b></div><div class="resourceCard">🪵 Wood<b>${Math.floor(settlement.wood)}</b></div><div class="resourceCard">🪨 Stone<b>${Math.floor(settlement.stone)}</b></div><div class="resourceCard">⛓ Iron<b>${Math.floor(settlement.iron||0)}</b></div><div class="resourceCard">🟡 Gold<b>${Math.floor(settlement.gold||0)}</b></div><div class="resourceCard">⬛ Coal<b>${Math.floor(settlement.coal||0)}</b></div></div><div class="sectionTitle">Settlement</div><div class="civRows"><div class="civRow"><span>Population</span><span>${people.filter(p=>p.alive).length} / ${homeCapacity()}</span></div><div class="civRow"><span>Buildings</span><span>${complete.length}${pending.length?` + ${pending.length} building`:''}</span></div><div class="civRow"><span>Births / deaths</span><span>${settlement.births} / ${settlement.deaths}</span></div></div><div class="sectionTitle">Jobs</div><div class="civRows">${Object.entries(counts).map(([k,v])=>`<div class="civRow"><span>${escapeHtml(k)}</span><span>${v}</span></div>`).join('')}</div><div class="sectionTitle">Discoveries</div><div class="techList">${techNames.map(t=>`<span class="tech ${hasTech(t)?'':'locked'}">${hasTech(t)?'✓ ':''}${t}</span>`).join('')}</div><div class="sectionTitle">Buildings</div><div class="civRows">${["firepit","hut","stockpile","farm","mine","granary","workshop"].map(t=>`<div class="civRow"><span>${t[0].toUpperCase()+t.slice(1)}</span><span>${buildingsOf(t).length}</span></div>`).join('')}</div>`}
+
+function showBuilding(b){
+  if(!b)return;selectedBuilding=b.id;selected=null;
+  const s=settlementById(b.settlementId),builder=personById(b.builderId),residents=buildingResidents(b),workers=buildingWorkers(b),a=AGE_DEFS[b.builtAgeIndex||0]||AGE_DEFS[0];
+  citizenName.textContent=b.name||buildingTypeLabel(b.type);
+  citizenSub.textContent=`${buildingTypeLabel(b.type)} · ${s?.name||"Unknown settlement"}`;
+  const history=(b.history||[]).map(h=>`<div class="memoryLine"><b>Day ${h.day}</b> · ${escapeHtml(h.text)}</div>`).join("");
+  const ageNow=Math.max(0,Math.floor(day-(b.builtDay??b.startedDay??day)));
+  citizenBody.innerHTML=`
+  <div class="citizenHero buildingHero"><div class="portrait buildingPortrait">🏠</div><div><b>${escapeHtml(b.name||buildingTypeLabel(b.type))}</b><small>${b.complete?"Active":"Under construction"} · ${Math.round(b.condition??100)}% condition</small></div></div>
+  <div class="citizenRow"><b>Settlement:</b> ${escapeHtml(s?.name||"None")}<br><b>Built in:</b> ${escapeHtml(a.name)}<br><b>Building age:</b> ${ageNow} days<br><b>Condition:</b> ${buildingConditionLabel(b)}</div>
+  <div class="citizenRow"><b>Construction:</b> ${b.complete?`Completed day ${b.builtDay??"?"}`:`${Math.round(b.progress||0)}% complete`}<br><b>Builder:</b> ${escapeHtml(builder?.name||"Unknown")}<br><b>Upgrade level:</b> ${b.upgradeLevel||0}</div>
+  ${b.type==="hut"?`<div class="citizenRow"><b>Residents:</b> ${residents.length?residents.map(p=>escapeHtml(p.name)).join(", "):"Empty"}<br><b>Capacity:</b> 4</div>`:""}
+  ${workers.length?`<div class="citizenRow"><b>Associated workers:</b> ${workers.slice(0,8).map(p=>escapeHtml(p.name)).join(", ")}${workers.length>8?` +${workers.length-8}`:""}</div>`:""}
+  ${b.type==="farm"?`<div class="citizenRow"><b>Crop growth:</b> ${Math.round(b.crop||0)}%<br><b>Harvests:</b> ${b.harvest||0}</div>`:""}
+  ${b.type==="spaceport"?`<div class="citizenRow"><b>Space program:</b> ${s?.spaceProgram?.moonLanded?"Moon landing achieved":`${s?.spaceProgram?.missions||0} missions`}<br><b>First Moon landing:</b> ${worldMilestones.moonLanding?`Day ${worldMilestones.firstMoonDay}`:"Not yet"}</div>`:""}
+  <div class="citizenSection">Building History</div>${history||`<div class="memoryLine muted">No recorded history yet.</div>`}`;
+  citizen.classList.remove("hidden")
+}
+function nearestInspectableBuilding(wx,wy,undergroundOnly=false){
+  let best=null,bd=999;
+  for(const b of buildings){
+    if(undergroundOnly&&b.type!=="mine")continue;
+    const d=Math.hypot(b.x-wx,b.y-wy);if(d<bd){best=b;bd=d}
+  }
+  return best&&bd<3.2?{building:best,distance:bd}:null
+}
+function nearestInspectablePerson(wx,wy,undergroundOnly=false){
+  let best=null,bd=999;
+  for(const p of alivePeople()){
+    if(undergroundOnly&&p.layer!=="underground")continue;
+    if(!undergroundOnly&&p.layer==="underground")continue;
+    const d=Math.hypot(p.x-wx,p.y-wy);if(d<bd){best=p;bd=d}
+  }
+  return best&&bd<2.6?{person:best,distance:bd}:null
+}
 function showCitizen(p){
-  selected=p.id;
+  selected=p.id;selectedBuilding=null;
   citizenName.textContent=p.name;
   citizenSub.textContent=`${Math.floor(p.age)} · ${p.lifeStage||lifeStageFor(p.age)} · ${p.alive?"Living":"Deceased"}`;
   const partner=p.partner?people.find(q=>q.id===p.partner):null;
@@ -2489,7 +2839,7 @@ function updateUI(force=true){
   layerIcon.textContent=activeLayer==="surface"?"🌿":"⛏️";layerLabel.textContent=activeLayer==="surface"?"Surface":"Underground";layerBtn.classList.toggle("underground",activeLayer==="underground");layerBtn.classList.toggle("surface",activeLayer==="surface");
   if(miniMapMode)miniMapMode.textContent=activeLayer==="surface"?atlasMode[0].toUpperCase()+atlasMode.slice(1):"Underground";
   const m=toolMeta[tool]||["✦",tool,""];status.textContent=tool==="inspect"?`${layerName()} · inspect · drag · pinch to zoom`:`${layerName()} · ${m[1]} · ${["deer","sheep","wolf","human","couple","family"].includes(tool)?"tap to place":`brush ${brush} · drag to paint`}`;
-  refreshToolChip();if(selected){const p=personById(selected);if(p&&!citizen.classList.contains("hidden"))showCitizen(p)}
+  refreshToolChip();if(!citizen.classList.contains("hidden")){if(selectedBuilding){const b=buildingById(selectedBuilding);if(b)showBuilding(b)}else if(selected){const p=personById(selected);if(p)showCitizen(p)}}
 }
 function spawnHumanAt(wx,wy,age=20){
   if(!passable(wx,wy)){showToast("Choose dry land");return null}
@@ -2502,11 +2852,11 @@ function spawnHumanAt(wx,wy,age=20){
 function applyTool(wx,wy,continuous=false){
   wx=Math.round(wx);wy=Math.round(wy);if(wx<0||wy<0||wx>=WORLD_W||wy>=WORLD_H)return;
   if(activeLayer==="underground"){
-    if(tool==="inspect"){if(continuous)return;const p=people.filter(q=>q.alive&&q.layer==="underground").sort((a,b)=>Math.hypot(a.x-wx,a.y-wy)-Math.hypot(b.x-wx,b.y-wy))[0];if(p&&Math.hypot(p.x-wx,p.y-wy)<5)showCitizen(p);return}
+    if(tool==="inspect"){if(continuous)return;const pp=nearestInspectablePerson(wx,wy,true),bb=nearestInspectableBuilding(wx,wy,true);if(bb&&(!pp||bb.distance<=pp.distance+.35))showBuilding(bb.building);else if(pp)showCitizen(pp.person);return}
     if(["cave","ustone","uwater","magma","uiron","ugold","ucoal","crystal","reveal"].includes(tool)){paintUnderground(wx,wy,brush,tool,!continuous);return}
     return
   }
-  if(tool==="inspect"){if(continuous)return;const p=people.filter(q=>q.alive).sort((a,b)=>Math.hypot(a.x-wx,a.y-wy)-Math.hypot(b.x-wx,b.y-wy))[0];if(p&&Math.hypot(p.x-wx,p.y-wy)<5)showCitizen(p);return}
+  if(tool==="inspect"){if(continuous)return;const pp=nearestInspectablePerson(wx,wy,false),bb=nearestInspectableBuilding(wx,wy,false);if(bb&&(!pp||bb.distance<=pp.distance+.35))showBuilding(bb.building);else if(pp)showCitizen(pp.person);return}
   if(["deer","sheep","wolf"].includes(tool)){if(continuous)return;spawnCritter(tool,wx,wy,1);return}
   if(tool==="human"){if(continuous)return;spawnHumanAt(wx,wy,20);assignJobs();return}
   if(tool==="couple"){if(continuous)return;const a=spawnHumanAt(wx-1,wy,22),b=spawnHumanAt(wx+1,wy,24);if(a&&b){a.sex="F";b.sex="M";a.partner=b.id;b.partner=a.id;a.relationshipStage=b.relationshipStage="dating";a.relationshipSince=b.relationshipSince=Math.floor(day);a.relations[b.id]=38;b.relations[a.id]=38;addEvent(`${a.name} and ${b.name} entered the world as a dating couple.`,"divine")}assignJobs();return}
@@ -2595,11 +2945,35 @@ function worldResetHtml(){
   <div class="warningBox" style="margin-top:10px">Resetting removes the current civilization, buildings, history, roads, fire, placed resources, creatures and underground mining progress. The world regenerates from the same seed and settings.</div>
   <button class="bigAction danger" data-action="reset-current-world" type="button">${resetWorldArmed?"⚠️ Tap again to confirm reset":"↺ Reset Current World"}</button>`
 }
+
+function ageProgressPercent(s){
+  const cur=s.ageIndex||0;if(cur>=AGE_DEFS.length-1)return 100;
+  const a=AGE_DEFS[cur].threshold,b=AGE_DEFS[cur+1].threshold;
+  return Math.round(clamp(((s.knowledge||0)-a)/(b-a),0,1)*100)
+}
+function agesHtml(){
+  const cards=settlements.slice().sort((a,b)=>(b.ageIndex||0)-(a.ageIndex||0)).map(s=>{
+    const a=ageDef(s),next=AGE_DEFS[(s.ageIndex||0)+1],pct=ageProgressPercent(s);
+    return `<div class="ageCard"><div class="ageHead"><span>${a.icon}</span><div><b>${escapeHtml(s.name)} · ${a.name}</b><small>${Math.round(s.knowledge||0)} knowledge${next?` · next: ${next.name}`:" · maximum age reached"}</small></div></div>
+    <div class="ageTrack"><i style="width:${pct}%"></i></div><p>${escapeHtml(a.desc)}</p>
+    <div class="civRows"><div class="civRow"><span>History medium</span><span>${historyMedium(s)}</span></div><div class="civRow"><span>Age began</span><span>Day ${s.ageStartedDay||0}</span></div><div class="civRow"><span>Moon program</span><span>${s.spaceProgram?.moonLanded?"Landed":(s.ageIndex||0)>=6?"Developing":"Not available"}</span></div></div></div>`
+  }).join("");
+  return `<div class="menuHero"><div class="eyebrow">Civilization Ages</div><h3>${AGE_DEFS[worldHighestAgeIndex()].icon} ${AGE_DEFS[worldHighestAgeIndex()].name}</h3><p>Each settlement advances independently through knowledge, population, resources, discoveries and infrastructure.</p></div>
+  <div class="ageTimeline">${AGE_DEFS.map((a,i)=>`<span class="${i<=worldHighestAgeIndex()?"reached":""}">${a.icon}<small>${a.name.replace(" Age","")}</small></span>`).join("")}</div>
+  ${worldMilestones.moonLanding?`<div class="moonBanner">🌕 First Moon landing · ${escapeHtml(settlementById(worldMilestones.firstMoonSettlementId)?.name||"Unknown")} · Day ${worldMilestones.firstMoonDay}</div>`:""}
+  ${cards}`
+}
+function chroniclesHtml(){
+  const s=settlementById(selectedSettlementId)||settlement,rows=settlementChronicles(s,45);
+  return `<div class="menuHero"><div class="eyebrow">Living History</div><h3>${escapeHtml(s.name)} Chronicles</h3><p>${historyMedium(s)} · reliability improves as civilizations develop writing, printing and digital archives.</p></div>
+  <div class="chronicleNotice">The same world event can be remembered differently by another civilization.</div>
+  ${rows.map(c=>`<div class="chronicleCard"><div class="chronicleHead"><b>Day ${c.day} · ${escapeHtml(c.kind)}</b><small>${escapeHtml(c.medium)} · ${Math.round(c.reliability)}% reliability</small></div><p>${escapeHtml(c.account)}</p><em>${escapeHtml(c.source)}</em></div>`).join("")||`<div class="emptyState">This civilization has not preserved a historical account yet.</div>`}`
+}
 function worldOverviewHtml(){
-  const alive=people.filter(p=>p.alive),activeWars=wars.filter(w=>w.status==="active"),currencies=settlements.filter(s=>ensureMarket(s).stage==="Coinage").length;
-  return `<div class="menuHero"><div class="eyebrow">Living world · ${worldAreaLabel()}</div><h3>${settlements.length} settlements · ${cultures.length} cultures</h3><p>Day ${Math.floor(day)} · ${eraName()} · Seed ${worldSeed}</p></div>
-  <div class="menuGrid"><div class="menuStat"><small>Population</small><b>${alive.length}</b></div><div class="menuStat"><small>Kingdoms</small><b>${kingdoms.length}</b></div><div class="menuStat"><small>Religions</small><b>${religions.length}</b></div><div class="menuStat"><small>Currencies</small><b>${currencies}</b></div></div>
-  <div class="menuSection">World civilization</div><div class="civRows"><div class="civRow"><span>🎭 Cultures</span><span>${cultures.length}</span></div><div class="civRow"><span>✦ Holy sites</span><span>${holySites.length}</span></div><div class="civRow"><span>🤝 Trade routes</span><span>${tradeRoutes.length}</span></div><div class="civRow"><span>⚔ Active wars</span><span>${activeWars.length}</span></div></div>
+  const alive=alivePeople(),activeWars=wars.filter(w=>w.status==="active"),currencies=settlements.filter(s=>ensureMarket(s).stage==="Coinage").length,worldAge=AGE_DEFS[worldHighestAgeIndex()];
+  return `<div class="menuHero"><div class="eyebrow">Living world · ${worldAreaLabel()}</div><h3>${worldAge.icon} ${worldAge.name}</h3><p>Day ${Math.floor(day)} · ${settlements.length} settlements · Seed ${worldSeed}</p></div>
+  <div class="menuGrid"><div class="menuStat"><small>Population</small><b>${alive.length}</b></div><div class="menuStat"><small>Cultures</small><b>${cultures.length}</b></div><div class="menuStat"><small>Religions</small><b>${religions.length}</b></div><div class="menuStat"><small>Moon</small><b>${worldMilestones.moonLanding?"Landed":"—"}</b></div></div>
+  <div class="menuSection">Civilization</div><div class="civRows"><div class="civRow"><span>🏰 Kingdoms</span><span>${kingdoms.length}</span></div><div class="civRow"><span>🪙 Currencies</span><span>${currencies}</span></div><div class="civRow"><span>🤝 Trade routes</span><span>${tradeRoutes.length}</span></div><div class="civRow"><span>⚔ Active wars</span><span>${activeWars.length}</span></div><div class="civRow"><span>📜 Preserved accounts</span><span>${chronicles.length}</span></div></div>
   <div class="menuSection">World makeup</div><div class="civRows"><div class="civRow"><span>🌿 Habitable land</span><span>${Math.round((tileCount(T.GRASS)+tileCount(T.FOREST)+tileCount(T.SAND))/N*100)}%</span></div><div class="civRow"><span>🌊 Water</span><span>${Math.round((tileCount(T.WATER)+tileCount(T.DEEP))/N*100)}%</span></div><div class="civRow"><span>⛰ Mountain / snow</span><span>${Math.round((tileCount(T.MOUNTAIN)+tileCount(T.SNOW))/N*100)}%</span></div></div>`
 }
 function peopleHtml(){
@@ -2629,9 +3003,9 @@ function culturesHtml(){
 }
 function faithHtml(){
   const cards=religions.map(r=>{const prophet=people.find(p=>p.id===r.prophetId),followers=religionFollowers(r),origin=settlementById(r.originSettlementId);
-    return `<div class="faithCard"><div class="cultureHead"><span class="faithSwatch" style="background:${religionColor(r,1)}">✦</span><div><b>${escapeHtml(r.name)}</b><small>${followers} followers · founded day ${r.foundedDay} in ${escapeHtml(origin?.name||"unknown")}</small></div></div><p>${escapeHtml(r.doctrine)}</p><div class="civRows"><div class="civRow"><span>Theme</span><span>${escapeHtml(divineThemeLabel(r.theme))}</span></div><div class="civRow"><span>Prophet</span><span>${escapeHtml(prophet?.name||"None")}</span></div><div class="civRow"><span>Holy sites</span><span>${r.holySiteIds.length}</span></div><div class="civRow"><span>Prestige</span><span>${Math.round(r.prestige||0)}</span></div></div></div>`}).join("");
+    return `<div class="faithCard"><div class="cultureHead"><span class="faithSwatch" style="background:${religionColor(r,1)}">✦</span><div><b>${escapeHtml(r.name)}</b><small>${followers} followers · founded day ${r.foundedDay} in ${escapeHtml(origin?.name||"unknown")}</small></div></div><p>${escapeHtml(r.doctrine)}</p><div class="civRows"><div class="civRow"><span>Theme</span><span>${escapeHtml(divineThemeLabel(r.theme))}</span></div><div class="civRow"><span>Prophet</span><span>${escapeHtml(prophet?.name||"None")}</span></div><div class="civRow"><span>Holy sites</span><span>${r.holySiteIds.length}</span></div><div class="civRow"><span>Prestige</span><span>${Math.round(r.prestige||0)}</span></div><div class="civRow"><span>Leadership</span><span>${escapeHtml(personById(r.religiousLeaderId)?.name||"None")}</span></div></div><div class="faithTeachings">${(r.teachings||[]).slice(-4).map(t=>`<span>• ${escapeHtml(t)}</span>`).join("")}</div></div>`}).join("");
   const perceptions=settlements.map(s=>`<div class="civRow"><span>${escapeHtml(s.name)}</span><span>${creatorPerception(s)} · ${Math.round(s.divineAttention||0)} signs</span></div>`).join("");
-  return `<div class="menuHero"><div class="eyebrow">Faith & the Creator</div><h3>${religions.length} organized faith${religions.length===1?"":"s"}</h3><p>People interpret what you do. Rain, healing, fire, lightning, creation and even long silence can shape belief.</p></div><div class="menuSection">How civilizations see you</div><div class="civRows">${perceptions}</div><div class="menuSection">Religions</div>${cards||`<div class="emptyState">No organized religion yet. Divine signs—or enough time wondering about a silent Creator—can change that.</div>`}<div class="menuSection">Holy sites</div>${holySites.slice(-8).reverse().map(h=>`<div class="updateItem"><b>✦ ${escapeHtml(h.name)}</b><small>${escapeHtml(settlementById(h.settlementId)?.name||"Unknown")} · day ${h.createdDay}</small><p>Remembered after ${escapeHtml(divineThemeLabel(h.event).toLowerCase())} touched this place.</p></div>`).join("")||`<div class="emptyState">No holy site has been remembered yet.</div>`}`
+  return `<div class="menuHero"><div class="eyebrow">Faith & the Creator</div><h3>${religions.length} organized faith${religions.length===1?"":"s"}</h3><p>People interpret what you do. Rain, healing, fire, lightning, creation and even long silence can shape belief.</p></div><div class="menuSection">How civilizations see you</div><div class="civRows">${perceptions}</div><div class="menuSection">Religious policy</div><div class="civRows">${settlements.map(s=>`<div class="civRow"><span>${escapeHtml(s.name)}</span><span>${escapeHtml(s.faithPolicy||"Tolerant")}</span></div>`).join("")}</div><div class="menuSection">Religions</div>${cards||`<div class="emptyState">No organized religion yet. Divine signs—or enough time wondering about a silent Creator—can change that.</div>`}<div class="menuSection">Holy sites</div>${holySites.slice(-8).reverse().map(h=>`<div class="updateItem"><b>✦ ${escapeHtml(h.name)}</b><small>${escapeHtml(settlementById(h.settlementId)?.name||"Unknown")} · day ${h.createdDay}</small><p>Remembered after ${escapeHtml(divineThemeLabel(h.event).toLowerCase())} touched this place.</p></div>`).join("")||`<div class="emptyState">No holy site has been remembered yet.</div>`}`
 }
 function economyHtml(){
   const cards=settlements.map(s=>{const m=ensureMarket(s),merchants=settlementPeople(s,true).filter(p=>p.economicRole==="Merchant"),classes={};for(const p of settlementPeople(s,true))classes[p.socialClass]=(classes[p.socialClass]||0)+1;
@@ -2652,7 +3026,7 @@ function villageHtml(){
   const avgHappy=residents.length?Math.round(residents.reduce((n,p)=>n+(p.happiness||0),0)/residents.length):0,avgBelief=residents.length?Math.round(residents.reduce((n,p)=>n+(p.belief||0),0)/residents.length):0;
   return `<div class="menuHero"><div class="eyebrow">${k?escapeHtml(k.name):"Independent settlement"}</div><h3>${escapeHtml(s.name)}</h3><p>${escapeHtml(s.identity)} · ${escapeHtml(c?.name||"Unformed culture")} · founded day ${s.foundedDay}</p></div>
   <div class="resourceGrid"><div class="resourceCard">👥 People<b>${residents.length}</b></div><div class="resourceCard">🍎 Food<b>${Math.floor(s.food)}</b></div><div class="resourceCard">💰 Wealth<b>${m.avgWealth.toFixed(1)}</b></div><div class="resourceCard">✦ Belief<b>${avgBelief}%</b></div><div class="resourceCard">⚔ Military<b>${militaryStrength(s)}</b></div></div>
-  <div class="menuSection">Identity</div><div class="civRows"><div class="civRow"><span>🎭 Culture</span><span>${escapeHtml(c?.name||"Unformed")}</span></div><div class="civRow"><span>✦ Religion</span><span>${escapeHtml(r?.name||"None")}</span></div><div class="civRow"><span>👁 Creator</span><span>${creatorPerception(s)}</span></div><div class="civRow"><span>🪙 Economy</span><span>${m.stage}${m.currency?` · ${escapeHtml(m.currency)}`:""}</span></div></div>
+  <div class="menuSection">Age & knowledge</div><div class="civRows"><div class="civRow"><span>${ageDef(s).icon} Age</span><span>${ageName(s)}</span></div><div class="civRow"><span>Knowledge</span><span>${Math.round(s.knowledge||0)} · ${ageProgressPercent(s)}%</span></div><div class="civRow"><span>History</span><span>${historyMedium(s)}</span></div></div><div class="ageTrack"><i style="width:${ageProgressPercent(s)}%"></i></div><div class="menuSection">Identity</div><div class="civRows"><div class="civRow"><span>🎭 Culture</span><span>${escapeHtml(c?.name||"Unformed")}</span></div><div class="civRow"><span>✦ Religion</span><span>${escapeHtml(r?.name||"None")}</span></div><div class="civRow"><span>👁 Creator</span><span>${creatorPerception(s)}</span></div><div class="civRow"><span>🪙 Economy</span><span>${m.stage}${m.currency?` · ${escapeHtml(m.currency)}`:""}</span></div></div>
   <div class="menuSection">Government</div><div class="civRows"><div class="civRow"><span>👑 Leader</span><span>${escapeHtml(leader?.name||"None")}</span></div><div class="civRow"><span>🏰 Realm</span><span>${escapeHtml(k?.name||"Independent")}</span></div><div class="civRow"><span>✨ Prosperity</span><span>${Math.round(s.prosperity||50)}%</span></div><div class="civRow"><span>😊 Happiness</span><span>${avgHappy}%</span></div></div>
   <div class="menuSection">Prices</div><div class="priceGrid"><span>🍎 ${m.prices.food.toFixed(1)}</span><span>🪵 ${m.prices.wood.toFixed(1)}</span><span>🪨 ${m.prices.stone.toFixed(1)}</span><span>⛓ ${m.prices.iron.toFixed(1)}</span></div>
   <div class="menuSection">Other settlements</div>${settlements.filter(o=>o.id!==s.id).map(o=>`<button class="listCard" data-settlement="${o.id}" type="button"><div class="civFlag small" style="background:${polityColor(o,1)}"></div><div class="grow"><b>${escapeHtml(o.name)}</b><small>${relationLabel(relationScore(s,o))} · ${escapeHtml(settlementCulture(o)?.name||"culture forming")} · ${escapeHtml(settlementReligion(o)?.name||"no faith")}</small></div><div class="rightText">👥 ${settlementPopulation(o)}</div></button>`).join("")||`<div class="emptyState">No other settlement exists yet.</div>`}`
@@ -2683,8 +3057,8 @@ function settingsHtml(){
   <div class="menuSection">World management</div><button class="bigAction" data-action="center-world" type="button">⌾ Center on selected settlement</button><button class="bigAction" data-action="open-world-creator" type="button">🌍 Open World Creator</button><button class="bigAction danger" data-action="open-world-reset" type="button">↺ Reset Current World</button>`
 }
 function updatesHtml(){
-  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V10.0.2 · Fast Brush & Trees</h3><p>A dedicated optimization release focused on smoother frame pacing and eliminating simulation spikes before V10.1 continues.</p></div>
-  <div class="updateItem"><b>V10.0.2 — Fast Brush & Trees</b><small>Current</small><p>Resource brushes no longer rebuild the continuous terrain texture. Tree placement stays a resource instead of silently converting grass into Forest terrain, tree art is cached into reusable sprites, brush stamping is movement/time throttled, and dense-tree rendering is cheaper.</p></div><div class="updateItem"><b>V10.0.1 — Performance Core</b><small>Previous</small><p>Major optimization pass: cached world indexes and AI targets, staggered simulation updates, cheaper job assignment, local social/relationship searches, visible-entity culling, adaptive visual detail, particle budgets, throttled Atlas/HUD refreshes, lower backing-texture memory and removal of an unnecessary periodic full terrain rebuild.</p></div><div class="updateItem"><b>V10.0 — Culture, Faith & Economy</b><small>Previous</small><p>Cultures now carry values, customs, festivals and heroes; daughter settlements can culturally diverge. Citizens have personal belief levels and religious stances. Divine actions alter how civilizations perceive the Creator and can create religions, prophets, clergy and holy sites. Settlements run markets with scarcity-driven prices, merchants, social classes, barter and emerging currencies. The Atlas adds Political, Culture, Faith and Economy modes.</p></div><div class="updateItem"><b>V9 — Civilizations & Kingdoms</b><small>Previous</small><p>Population pressure can create new settlements led by real migrating families. Every settlement has resources, buildings, territory, leaders, identity, diplomacy and military strength. Settlements trade, form kingdoms, develop rivalries, fight wars with named citizen casualties, and generate refugees whose citizenship histories persist.</p></div>
+  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V10.1 · Ages, Living History & Civilization Scale</h3><p>A dedicated optimization release focused on smoother frame pacing and eliminating simulation spikes before V10.1 continues.</p></div>
+  <div class="updateItem"><b>V10.1 — Ages, Living History & Civilization Scale</b><small>Current</small><p>Seven civilization ages now progress from caveman Stone Age societies through Bronze, Iron, Medieval, Industrial, Technology and Space Ages, culminating in a real Moon-landing milestone. World objects are scaled down for denser islands. Buildings are individually inspectable with names, builders, condition, residents/workers and persistent history. Religions gain teachings, hierarchy, policy and pilgrimages, cultures preserve identity across generations, and each civilization writes its own perspective on major world events.</p></div><div class="updateItem"><b>V10.0.2 — Fast Brush & Trees</b><small>Previous</small><p>Resource brushes no longer rebuild the continuous terrain texture. Tree placement stays a resource instead of silently converting grass into Forest terrain, tree art is cached into reusable sprites, brush stamping is movement/time throttled, and dense-tree rendering is cheaper.</p></div><div class="updateItem"><b>V10.0.1 — Performance Core</b><small>Previous</small><p>Major optimization pass: cached world indexes and AI targets, staggered simulation updates, cheaper job assignment, local social/relationship searches, visible-entity culling, adaptive visual detail, particle budgets, throttled Atlas/HUD refreshes, lower backing-texture memory and removal of an unnecessary periodic full terrain rebuild.</p></div><div class="updateItem"><b>V10.0 — Culture, Faith & Economy</b><small>Previous</small><p>Cultures now carry values, customs, festivals and heroes; daughter settlements can culturally diverge. Citizens have personal belief levels and religious stances. Divine actions alter how civilizations perceive the Creator and can create religions, prophets, clergy and holy sites. Settlements run markets with scarcity-driven prices, merchants, social classes, barter and emerging currencies. The Atlas adds Political, Culture, Faith and Economy modes.</p></div><div class="updateItem"><b>V9 — Civilizations & Kingdoms</b><small>Previous</small><p>Population pressure can create new settlements led by real migrating families. Every settlement has resources, buildings, territory, leaders, identity, diplomacy and military strength. Settlements trade, form kingdoms, develop rivalries, fight wars with named citizen casualties, and generate refugees whose citizenship histories persist.</p></div>
   <div class="updateItem"><b>V8.3 — Natural Coastline Water</b><small>Previous</small><p>Natural shallow-water shelves and coastline-oriented animated surf.</p></div>
   <div class="updateItem"><b>V8.2 — Natural Effects</b><small>Previous</small><p>Lightning is now a real branching strike with a brief flash instead of a grid of hazard markers. Fire uses irregular animated flame clusters and embers. The broad turquoise ocean halo was removed at the terrain-color level, leaving only a narrow coastal shallows transition and moving foam.</p></div><div class="updateItem"><b>V8.1 — Living Ocean</b><small>Previous</small><p>Ocean animation moved to real elapsed frame time with traveling wave bands and tidal surf.</p></div><div class="updateItem"><b>V8 — Premium Painted World</b><small>Previous</small><p>The surface renderer moved to continuous height/moisture sampling with smoothed terrain, mixed forests and upgraded miniature people and wildlife.</p></div><div class="updateItem"><b>V7.2 — Painted World Pass</b><small>Previous</small><p>Added larger painterly land dabs, softer shore blending, stronger surf and more organic forest shapes.</p></div><div class="updateItem"><b>V7.1 — Brushed World Pass</b><small>Previous</small><p>Terrain leans harder into a brushed look with stronger painterly dabs, forests render more organically, and water has much more visible motion and shoreline surf.</p></div><div class="updateItem"><b>V7 — Premium Art Pass</b><small>Previous</small><p>The world now uses a richer painterly land overlay, softer coastal blending, more alive shore water, refined huts and farms, and upgraded tiny sprites so citizens and animals feel like miniature living beings in a premium-looking world.</p></div><div class="updateItem"><b>V6.6 — Organic Terrain + Sprite Overhaul</b><small>Previous</small><p>Coastlines became softer, shoreline water gained a light tide effect, wave motion became more visible, and both citizens and animals received upgraded tiny vector sprites.</p></div><div class="updateItem"><b>V6.5 — Grand Graphics Overhaul</b><small>Previous</small><p>The world surface was rebuilt with sharper texturing, richer biome color, animated wave motion, improved shoreline foam, bush-like food clusters, cleaner low-zoom forest rendering and stronger visual grounding between the land and the citizens.</p></div><div class="updateItem"><b>V6 — Living Civilization</b><small>Previous</small><p>Citizens age, learn, build skills, form households, create families, experience grief and leave a lineage behind.</p></div><div class="updateItem"><b>V5.4 — World Scale</b><small>Previous</small><p>Dynamic 100×100 through 500×500 world sizes.</p></div><div class="updateItem"><b>V5.3 — Family & Marriage</b><small>Previous</small><p>Dating, emotional bonds, marriage, shared surnames, breakups and child surname inheritance.</p></div><div class="updateItem"><b>V5.2 — Responsive World</b><small>Previous</small><p>Responsive landscape catalogs, smaller wording and procedural unique names.</p></div><div class="updateItem"><b>V5.1 — Living World</b><small>Previous</small><p>Compact HUD, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs and relationships.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
   <div class="updateItem"><b>V4.1 — Underground</b><small>Previous</small><p>Surface/Underground toggle, caves, deep stone, underground lakes, magma, iron/gold/coal/crystal veins, mine entrances, tunneling miners and layer-aware god powers.</p></div>
@@ -2695,8 +3069,8 @@ function updatesHtml(){
 function renderWorldTab(){
   menuTitle.textContent="World";menuSubtitle.textContent="Civilizations, kingdoms, people and history";
   menuSegments.classList.remove("hidden");
-  menuSegments.innerHTML=sectionButton("overview","Overview")+sectionButton("civs","Civilizations")+sectionButton("culture","Culture")+sectionButton("faith","Faith")+sectionButton("economy","Economy")+sectionButton("people","People")+sectionButton("families","Families")+sectionButton("village","Settlement")+sectionButton("war","War")+sectionButton("history","History")+sectionButton("creator","World Creator")+sectionButton("reset","Reset")+sectionButton("settings","Settings")+sectionButton("updates","Updates");
-  const pages={overview:worldOverviewHtml,civs:civilizationsHtml,culture:culturesHtml,faith:faithHtml,economy:economyHtml,people:peopleHtml,families:familyRegistryHtml,village:villageHtml,war:warHtml,history:historyHtml,creator:worldCreatorHtml,reset:worldResetHtml,settings:settingsHtml,updates:updatesHtml};menuBody.innerHTML=(pages[worldSection]||worldOverviewHtml)()
+  menuSegments.innerHTML=sectionButton("overview","Overview")+sectionButton("civs","Civilizations")+sectionButton("ages","Ages")+sectionButton("culture","Culture")+sectionButton("faith","Faith")+sectionButton("economy","Economy")+sectionButton("chronicles","Chronicles")+sectionButton("people","People")+sectionButton("families","Families")+sectionButton("village","Settlement")+sectionButton("war","War")+sectionButton("history","History")+sectionButton("creator","World Creator")+sectionButton("reset","Reset")+sectionButton("settings","Settings")+sectionButton("updates","Updates");
+  const pages={overview:worldOverviewHtml,civs:civilizationsHtml,ages:agesHtml,culture:culturesHtml,faith:faithHtml,economy:economyHtml,chronicles:chroniclesHtml,people:peopleHtml,families:familyRegistryHtml,village:villageHtml,war:warHtml,history:historyHtml,creator:worldCreatorHtml,reset:worldResetHtml,settings:settingsHtml,updates:updatesHtml};menuBody.innerHTML=(pages[worldSection]||worldOverviewHtml)()
 }
 function renderPowersTab(){
   menuTitle.textContent="God Powers";menuSubtitle.textContent=`Transform the ${resourceLayer==="surface"?"surface":"underground"}`;

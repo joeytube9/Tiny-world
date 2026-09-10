@@ -878,3 +878,18 @@ button.active{
 .performanceCard{padding:8px 9px;margin:0 0 7px;border-radius:12px;background:rgba(95,154,103,.07);border:1px solid rgba(133,194,137,.10)}
 .performanceCard b{display:block;font-size:9px}.performanceCard small{display:block;margin-top:2px;font-size:7px;color:#9fc4a3}
 .performanceCard p{margin:5px 0 0;font-size:7px;line-height:1.4;color:#96a9ac}
+
+/* V10.1 — Ages, Living History & Inspection */
+.ageTimeline{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin:6px 0 9px}
+.ageTimeline span{display:grid;place-items:center;gap:2px;padding:5px 1px;border-radius:8px;opacity:.38;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.045);font-size:11px}
+.ageTimeline span.reached{opacity:1;background:rgba(118,167,103,.09);border-color:rgba(156,207,139,.12)}
+.ageTimeline small{font-size:5.5px;color:#a8b9b7}
+.ageCard,.chronicleCard{padding:8px;margin-bottom:6px;border-radius:12px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.065)}
+.ageHead{display:flex;gap:7px;align-items:center}.ageHead>span{font-size:18px}.ageHead b{font-size:9px}.ageHead small{display:block;font-size:6.5px;color:#94a7aa;margin-top:2px}
+.ageCard p{font-size:7px;color:#9fafb1;line-height:1.4;margin:5px 0}
+.ageTrack{height:4px;background:rgba(255,255,255,.06);border-radius:999px;overflow:hidden;margin:6px 0}.ageTrack i{display:block;height:100%;background:linear-gradient(90deg,#86b877,#cfb96b);border-radius:999px}
+.moonBanner{padding:8px;margin-bottom:8px;border-radius:11px;text-align:center;font-size:8px;background:rgba(124,151,181,.10);border:1px solid rgba(161,194,224,.13)}
+.chronicleNotice{padding:6px 8px;margin-bottom:7px;border-radius:10px;font-size:7px;color:#aec0bf;background:rgba(129,154,150,.07)}
+.chronicleHead{display:flex;justify-content:space-between;gap:5px}.chronicleHead b{font-size:8px}.chronicleHead small{font-size:6px;color:#8fa4a7}
+.chronicleCard p{font-size:7.5px;line-height:1.45;color:#d0d9d6;margin:6px 0}.chronicleCard em{font-size:6.5px;color:#83989b;font-style:normal}
+.buildingHero .buildingPortrait{font-size:20px}.faithTeachings{display:grid;gap:3px;margin-top:6px;padding-top:5px;border-top:1px solid rgba(255,255,255,.05)}.faithTeachings span{font-size:7px;color:#b7c4c2;line-height:1.35}
