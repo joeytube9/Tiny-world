@@ -25,7 +25,7 @@ function allocateWorld(size=200){
   const allowed=[100,150,200,300,500];
   const s=allowed.includes(Number(size))?Number(size):200;
   WORLD_W=s;WORLD_H=s;N=s*s;
-  TEX=s>=500?1:2;
+  TEX=textureScaleForWorld(s);
   terrain=new Uint8Array(N);height=new Float32Array(N);moisture=new Float32Array(N);
   food=new Uint8Array(N);trees=new Uint8Array(N);rocks=new Uint8Array(N);
   iron=new Uint8Array(N);gold=new Uint8Array(N);wet=new Uint8Array(N);
@@ -57,6 +57,9 @@ let lastGeneratedConfig=Object.assign({},defaultWorldConfig);
 let settings={labels:true,trails:true,dayNight:true,effects:true};try{settings=Object.assign(settings,JSON.parse(localStorage.getItem("tinyWorldSettings")||"{}"))}catch(e){}try{worldConfig=Object.assign(worldConfig,JSON.parse(localStorage.getItem("tinyWorldConfig")||"{}"))}catch(e){}
 
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),idx=(x,y)=>y*WORLD_W+x,rnd=(a,b)=>a+Math.random()*(b-a),rndi=(a,b)=>Math.floor(rnd(a,b+1)),lerp=(a,b,t)=>a+(b-a)*t;
+function mixColor(a,b,t){return[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t]}
+function textureScaleForWorld(size){return size<=100?5:size<=150?5:size<=200?4:size<=300?3:2}
+
 function hash(x,y,s=0){let n=(x*374761393+y*668265263+s*1442695041)|0;n=(n^(n>>13))*1274126177;return((n^(n>>16))>>>0)/4294967295}
 function fade(t){return t*t*(3-2*t)}
 function valueNoise(x,y,scale,seed){const fx=x/scale,fy=y/scale,x0=Math.floor(fx),y0=Math.floor(fy),sx=fade(fx-x0),sy=fade(fy-y0),a=hash(x0,y0,seed),b=hash(x0+1,y0,seed),c=hash(x0,y0+1,seed),d=hash(x0+1,y0+1,seed);return lerp(lerp(a,b,sx),lerp(c,d,sx),sy)}
@@ -110,41 +113,81 @@ function renderHistory(){historyList.innerHTML=events.map(e=>`<div class="event"
 function discover(name,text){if(settlement.tech.has(name))return;settlement.tech.add(name);addEvent(text||`${settlement.name} discovered ${name}.`,"discovery");showToast(`Discovery: ${name}`)}
 function hasTech(name){return settlement.tech.has(name)}
 
-function colorFor(t,x,y,i){const v=(hash(x,y,31)-.5)*12;const c={[T.DEEP]:[28,79,111],[T.WATER]:[43,120,151],[T.SAND]:[205,177,102],[T.GRASS]:[104,157,76],[T.FOREST]:[62,116,57],[T.MOUNTAIN]:[104,109,106],[T.SNOW]:[210,216,211],[T.LAVA]:[129,48,24]};let [r,g,b]=c[t]||c[T.GRASS];if(scar[i]){r=61;g=52;b=43}if(burn[i]&&t!==T.LAVA){r=clamp(r+burn[i]*.22,0,255);g=clamp(g-burn[i]*.12,0,255);b=clamp(b-burn[i]*.16,0,255)}return[clamp(r+v,0,255),clamp(g+v,0,255),clamp(b+v,0,255)]}
+function colorFor(t,x,y,i){
+  const h=height[i],m=moisture[i],shore=shorelineFactor(x,y);
+  const jitter=(hash(x,y,31)-.5)*10,detail=(hash(x,y,47)-.5)*8;
+  let c=[98,154,84];
+  if(t===T.DEEP)c=mixColor([9,53,84],[22,74,116],clamp(h/.32,0,1));
+  else if(t===T.WATER)c=mixColor([34,118,158],[78,168,201],clamp(shore*.65+h*.55,0,1));
+  else if(t===T.SAND)c=mixColor([198,174,112],[223,203,143],clamp(shore*.72+(hash(x,y,52)*.18),0,1));
+  else if(t===T.GRASS)c=mixColor([84,146,79],[122,180,108],clamp(m*.45+(h-.40)*.55,0,1));
+  else if(t===T.FOREST)c=mixColor([43,95,55],[76,131,72],clamp(m*.42+(hash(x,y,58)*.18),0,1));
+  else if(t===T.MOUNTAIN)c=mixColor([92,96,98],[126,130,132],clamp((h-.70)*2.0,0,1));
+  else if(t===T.SNOW)c=mixColor([212,220,224],[240,246,248],clamp((h-.82)*4.0,0,1));
+  else if(t===T.LAVA)c=mixColor([129,43,20],[198,92,28],clamp(hash(x,y,66),0,1));
+  let [r,g,b]=c;
+  if(t===T.GRASS||t===T.FOREST){g+=4+shore*5;b+=m*2}
+  if(t===T.WATER||t===T.DEEP){b+=8+shore*12;g+=shore*5}
+  if(t===T.SAND){r+=shore*8;g+=shore*7}
+  if(scar[i]){r=60;g=51;b=42}
+  if(burn[i]&&t!==T.LAVA){r=clamp(r+burn[i]*.20,0,255);g=clamp(g-burn[i]*.12,0,255);b=clamp(b-burn[i]*.16,0,255)}
+  return[clamp(r+jitter+detail*.22,0,255),clamp(g+jitter+detail*.18,0,255),clamp(b+jitter+detail*.12,0,255)]
+}
 function nearType(x,y,type){for(let yy=Math.max(0,y-1);yy<=Math.min(WORLD_H-1,y+1);yy++)for(let xx=Math.max(0,x-1);xx<=Math.min(WORLD_W-1,x+1);xx++)if(terrain[idx(xx,yy)]===type)return true;return false}
 function shorelineFactor(x,y){const t=terrain[idx(x,y)];if(t!==T.WATER&&t!==T.SAND)return 0;let land=0,total=0;for(let yy=-2;yy<=2;yy++)for(let xx=-2;xx<=2;xx++){const nx=x+xx,ny=y+yy;if(nx<0||ny<0||nx>=WORLD_W||ny>=WORLD_H)continue;total++;const nt=terrain[idx(nx,ny)];if(nt>=T.SAND)land++}return land/Math.max(1,total)}
 function rebuildTerrain(){
   const im=tctx.createImageData(terrainCanvas.width,terrainCanvas.height),d=im.data;
   for(let y=0;y<WORLD_H;y++)for(let x=0;x<WORLD_W;x++){
-    const i=idx(x,y),t=terrain[i],[r0,g0,b0]=colorFor(t,x,y,i);
+    const i=idx(x,y),t=terrain[i],[r0,g0,b0]=colorFor(t,x,y,i),shore=shorelineFactor(x,y);
     const hl=height[idx(Math.max(0,x-1),y)],hr=height[idx(Math.min(WORLD_W-1,x+1),y)],hu=height[idx(x,Math.max(0,y-1))],hd=height[idx(x,Math.min(WORLD_H-1,y+1))];
-    const light=18-(hr-hl)*72-(hd-hu)*52+(t===T.MOUNTAIN||t===T.SNOW?12:0)+(t===T.WATER||t===T.DEEP?-8:0);
-    const humid=(moisture[i]-.5)*8,edge=shorelineFactor(x,y);
+    const slope=((hl-hr)*88)+((hu-hd)*74);
+    const ridge=(Math.abs(hr-hl)+Math.abs(hd-hu))*92;
+    const humid=(moisture[i]-.5)*9;
     for(let sy=0;sy<TEX;sy++)for(let sx=0;sx<TEX;sx++){
-      const micro=(hash(x*TEX+sx,y*TEX+sy,worldSeed+91)-.5)*8;
-      let r=r0+micro+light+humid,g=g0+micro+light*1.04+humid*1.2,b=b0+micro+light*.88;
+      const nx=(sx+.5)/TEX,ny=(sy+.5)/TEX;
+      const micro=(hash(x*TEX+sx,y*TEX+sy,worldSeed+91)-.5)*7;
+      const patch=(valueNoise(x*3+nx*2,y*3+ny*2,7,worldSeed+77)-.5)*12;
+      const highlight=(1-nx)*.55+(1-ny)*.25;
+      let r=r0+micro+patch*.22+slope*.22+humid*.18+highlight;
+      let g=g0+micro+patch*.30+slope*.24+humid*.30+highlight*1.2;
+      let b=b0+micro+patch*.14+slope*.12+humid*.10+highlight*.8;
       if(t===T.WATER||t===T.DEEP){
-        const wave=Math.sin((x+sx*.5)*.55+tick*.04)+Math.sin((y+sy*.5)*.42+tick*.05);
-        b+=8+edge*18+wave*2;r-=4;g+=edge*9
+        const depthTint=(t===T.DEEP?0.72:1.0);
+        b+=7+shore*22+patch*.16;
+        g+=shore*10+patch*.05;
+        r-=4*depthTint;
       }
-      if(t===T.SAND&&edge>.18){r+=edge*14;g+=edge*10;b+=edge*4}
-      if(t===T.FOREST){g+=5}
-      if(t===T.LAVA){r+=28;g+=8}
+      if(t===T.SAND){r+=shore*16+patch*.12;g+=shore*12+patch*.10;b+=shore*5}
+      if(t===T.GRASS){g+=4+patch*.18;b+=shore*2}
+      if(t===T.FOREST){g+=8+patch*.14;b+=2}
+      if(t===T.MOUNTAIN||t===T.SNOW){r+=ridge*.12;g+=ridge*.12;b+=ridge*.12}
+      if(t===T.LAVA){r+=26+Math.max(0,patch*.5);g+=8}
       const p=((y*TEX+sy)*terrainCanvas.width+(x*TEX+sx))*4;
-      d[p]=clamp(r,0,255);d[p+1]=clamp(g,0,255);d[p+2]=clamp(b,0,255);d[p+3]=255
+      d[p]=clamp(r,0,255);d[p+1]=clamp(g,0,255);d[p+2]=clamp(b,0,255);d[p+3]=255;
     }
   }
   tctx.putImageData(im,0,0);
-  tctx.save();tctx.globalAlpha=.14;
+
+  tctx.save();
+  tctx.globalAlpha=.20;
   for(let y=1;y<WORLD_H-1;y++)for(let x=1;x<WORLD_W-1;x++){
-    const i=idx(x,y),t=terrain[i];
-    if((t===T.WATER||t===T.DEEP)&&(nearType(x,y,T.SAND)||nearType(x,y,T.GRASS)||nearType(x,y,T.FOREST))&&hash(x,y,worldSeed+200)>.26){tctx.fillStyle="#eff7f2";tctx.fillRect(x*TEX,y*TEX,TEX,1)}
-    if((t===T.GRASS||t===T.FOREST)&&hash(x,y,worldSeed+201)>.965){tctx.fillStyle="rgba(240,240,179,.75)";tctx.fillRect(x*TEX+1,y*TEX+1,1,1)}
+    const i=idx(x,y),t=terrain[i],shore=shorelineFactor(x,y);
+    if((t===T.WATER||t===T.DEEP)&&shore>.14&&hash(x,y,worldSeed+200)>.34){
+      tctx.fillStyle="rgba(244,251,248,.85)";
+      tctx.fillRect(x*TEX,y*TEX+(hash(x,y,worldSeed+201)>.5?0:1),TEX,1);
+    }
+    if((t===T.GRASS||t===T.FOREST)&&hash(x,y,worldSeed+202)>.93){
+      tctx.fillStyle=hash(x,y,worldSeed+203)>.72?"rgba(244,223,132,.55)":"rgba(96,152,79,.45)";
+      tctx.fillRect(x*TEX+rndi(0,Math.max(0,TEX-1)),y*TEX+rndi(0,Math.max(0,TEX-1)),1,1);
+    }
+    if(t===T.SAND&&hash(x,y,worldSeed+204)>.90){
+      tctx.fillStyle="rgba(153,124,74,.33)";
+      tctx.fillRect(x*TEX+rndi(0,Math.max(0,TEX-1)),y*TEX+rndi(0,Math.max(0,TEX-1)),1,1);
+    }
   }
-  tctx.restore();dirty=false
+  tctx.restore();
+  dirty=false
 }
-
-
 
 function undergroundColor(t,x,y){
   const jitter=(hash(x,y,worldSeed+813)-.5)*12;
@@ -1079,19 +1122,35 @@ function generate(useExistingSeed=false){
 
 function drawTrails(){const b=visibleBounds(2),step=zoom<3?3:zoom<4?2:1;ctx.save();ctx.lineCap="round";for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){const v=trail[idx(x,y)];if(v<12)continue;const s=worldToScreen(x+.5,y+.5),z=cameraScale();ctx.fillStyle=v>80?"rgba(118,88,55,.52)":`rgba(135,103,67,${Math.min(.38,v/230)})`;ctx.beginPath();ctx.ellipse(s.x,s.y,Math.max(1.4,z*.48),Math.max(1,z*.22),hash(x,y,9)*Math.PI,0,Math.PI*2);ctx.fill()}ctx.restore()}
 function drawWater(){
-  const b=visibleBounds(2),step=zoom<3?4:zoom<5?2:1,z=cameraScale();
+  const b=visibleBounds(2),step=zoom<3?5:zoom<5?3:2,z=cameraScale();
   ctx.save();
+  ctx.lineCap="round";
   for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){
     const t=terrain[idx(x,y)];if(t!==T.WATER&&t!==T.DEEP)continue;
-    const s=worldToScreen(x+.5,y+.5),shore=shorelineFactor(x,y),wave=(Math.sin(tick*.072+x*.52+y*.31)+Math.sin(tick*.053+x*.18-y*.36))*0.5;
-    if(hash(x,y,worldSeed+333)>.46){
-      const len=z*(.42+hash(x,y,worldSeed+334)*.65);
-      ctx.strokeStyle=`rgba(233,247,250,${0.10+shore*.22})`;ctx.lineWidth=Math.max(1,z*.085);
-      ctx.beginPath();ctx.moveTo(s.x-len,s.y+wave*z*.14);ctx.lineTo(s.x+len,s.y+wave*z*.14);ctx.stroke()
+    const s=worldToScreen(x+.5,y+.5),shore=shorelineFactor(x,y);
+    const waveA=Math.sin(tick*.090+x*.62+y*.24),waveB=Math.sin(tick*.056-x*.18+y*.45),wave=(waveA+waveB)*.5;
+    if(hash(x,y,worldSeed+333)>.32){
+      const len=z*(.22+hash(x,y,worldSeed+334)*.52);
+      const alpha=(t===T.WATER?.15:.10)+shore*.17;
+      ctx.strokeStyle=`rgba(236,247,252,${alpha})`;
+      ctx.lineWidth=Math.max(1,z*.075);
+      ctx.beginPath();
+      ctx.moveTo(s.x-len,s.y+wave*z*.12);
+      ctx.quadraticCurveTo(s.x,s.y-wave*z*.14,s.x+len,s.y+wave*z*.08);
+      ctx.stroke();
     }
-    if(shore>.28&&hash(x,y,worldSeed+335)>.32){
-      ctx.fillStyle=`rgba(240,251,247,${.08+shore*.12})`;
-      ctx.beginPath();ctx.arc(s.x,s.y,z*(.12+shore*.12),0,Math.PI*2);ctx.fill()
+    if(hash(x,y,worldSeed+338)>.80&&z>3.3){
+      ctx.fillStyle=`rgba(255,255,255,${.05+shore*.10})`;
+      ctx.beginPath();
+      ctx.arc(s.x+waveA*z*.06,s.y+waveB*z*.06,Math.max(.7,z*.05),0,Math.PI*2);
+      ctx.fill();
+    }
+    if(shore>.18&&hash(x,y,worldSeed+335)>.26){
+      ctx.strokeStyle=`rgba(247,253,249,${.08+shore*.18})`;
+      ctx.lineWidth=Math.max(1,z*.08);
+      ctx.beginPath();
+      ctx.arc(s.x,s.y,z*(.08+shore*.12),0,Math.PI*2);
+      ctx.stroke();
     }
   }
   ctx.restore()
@@ -1100,35 +1159,150 @@ function drawGroundDetails(){
   const b=visibleBounds(3),step=zoom<4?2:1,z=cameraScale();
   for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){
     const i=idx(x,y),t=terrain[i],s=worldToScreen(x+.5,y+.5),h=hash(x,y,worldSeed+411);
-    if((t===T.GRASS||t===T.FOREST)&&zoom>=3&&h>.72){
-      ctx.strokeStyle=h>.95?"#f2d986":h>.86?"#8cc169":"#5d964f";ctx.lineWidth=Math.max(1,z*.08);
-      ctx.beginPath();ctx.moveTo(s.x-z*.08,s.y+z*.18);ctx.lineTo(s.x,s.y-z*.18);ctx.lineTo(s.x+z*.09,s.y+z*.14);ctx.stroke()
+
+    if((t===T.GRASS||t===T.FOREST)&&zoom>=3&&h>.66){
+      ctx.strokeStyle=h>.93?"#f1d37d":h>.84?"#98ca70":"#5f9950";
+      ctx.lineWidth=Math.max(1,z*.08);
+      ctx.beginPath();
+      ctx.moveTo(s.x-z*.12,s.y+z*.18);ctx.lineTo(s.x-z*.03,s.y-z*.12);
+      ctx.moveTo(s.x,s.y+z*.18);ctx.lineTo(s.x,s.y-z*.22);
+      ctx.moveTo(s.x+z*.11,s.y+z*.16);ctx.lineTo(s.x+z*.03,s.y-z*.10);
+      ctx.stroke();
     }
-    if(t===T.GRASS&&h>.965&&zoom>=4){ctx.fillStyle="#eadb89";ctx.beginPath();ctx.arc(s.x-z*.12,s.y-z*.06,z*.08,0,Math.PI*2);ctx.arc(s.x+z*.08,s.y-z*.02,z*.08,0,Math.PI*2);ctx.fill()}
-    if(food[i]&&h>.48){ctx.fillStyle="#b63839";ctx.beginPath();ctx.arc(s.x-z*.10,s.y-z*.04,z*.15,0,Math.PI*2);ctx.arc(s.x+z*.08,s.y-z*.10,z*.13,0,Math.PI*2);ctx.fill();ctx.strokeStyle="#6b4f27";ctx.lineWidth=Math.max(1,z*.05);ctx.beginPath();ctx.moveTo(s.x-z*.02,s.y-z*.02);ctx.lineTo(s.x,s.y-z*.24);ctx.stroke()}
-    if(rocks[i]>0&&h>.45){ctx.fillStyle="#6f7575";ctx.beginPath();ctx.ellipse(s.x,s.y,z*.42,z*.28,-.15,0,Math.PI*2);ctx.fill();ctx.fillStyle="#9aa19f";ctx.beginPath();ctx.ellipse(s.x-z*.14,s.y-z*.05,z*.15,z*.10,-.15,0,Math.PI*2);ctx.fill()}
-    if(t===T.SAND&&h>.88&&zoom>=3){ctx.fillStyle="rgba(139,116,66,.65)";ctx.fillRect(s.x-z*.08,s.y,z*.12,z*.12)}
-    if(iron[i]>0&&h>.56){ctx.fillStyle="#936255";ctx.beginPath();ctx.arc(s.x+z*.06,s.y-z*.08,z*.16,0,Math.PI*2);ctx.fill()}
-    if(gold[i]>0&&h>.68){ctx.fillStyle="#d8b650";ctx.beginPath();ctx.arc(s.x-z*.10,s.y-z*.06,z*.13,0,Math.PI*2);ctx.fill()}
+
+    if(t===T.GRASS&&h>.968&&zoom>=4){
+      ctx.fillStyle="#ead88c";
+      ctx.beginPath();
+      ctx.arc(s.x-z*.14,s.y-z*.04,z*.08,0,Math.PI*2);
+      ctx.arc(s.x+z*.02,s.y-z*.10,z*.07,0,Math.PI*2);
+      ctx.arc(s.x+z*.12,s.y-z*.02,z*.08,0,Math.PI*2);
+      ctx.fill();
+    }
+
+    if(food[i]&&h>.44){
+      ctx.fillStyle="rgba(0,0,0,.18)";
+      ctx.beginPath();
+      ctx.ellipse(s.x,s.y+z*.22,z*.42,z*.18,0,0,Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle="#5d8e47";
+      ctx.beginPath();
+      ctx.arc(s.x-z*.12,s.y-z*.02,z*.20,0,Math.PI*2);
+      ctx.arc(s.x+z*.05,s.y-z*.10,z*.22,0,Math.PI*2);
+      ctx.arc(s.x+z*.16,s.y+z*.02,z*.18,0,Math.PI*2);
+      ctx.arc(s.x-z*.02,s.y-z*.16,z*.20,0,Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle="#79ae5f";
+      ctx.beginPath();
+      ctx.arc(s.x-z*.04,s.y-z*.12,z*.10,0,Math.PI*2);
+      ctx.arc(s.x+z*.12,s.y-z*.02,z*.09,0,Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle="#c74748";
+      ctx.beginPath();
+      ctx.arc(s.x-z*.12,s.y+z*.04,z*.06,0,Math.PI*2);
+      ctx.arc(s.x+z*.02,s.y+z*.01,z*.06,0,Math.PI*2);
+      ctx.arc(s.x+z*.14,s.y+z*.08,z*.05,0,Math.PI*2);
+      ctx.fill();
+    }
+
+    if(rocks[i]>0&&h>.44){
+      ctx.fillStyle="rgba(0,0,0,.15)";
+      ctx.beginPath();ctx.ellipse(s.x,s.y+z*.22,z*.42,z*.16,0,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle="#6f7575";
+      ctx.beginPath();
+      ctx.moveTo(s.x-z*.28,s.y+z*.10);ctx.lineTo(s.x-z*.08,s.y-z*.16);ctx.lineTo(s.x+z*.20,s.y-z*.06);ctx.lineTo(s.x+z*.28,s.y+z*.12);ctx.lineTo(s.x,s.y+z*.18);
+      ctx.fill();
+      ctx.fillStyle="#a8b0af";
+      ctx.beginPath();ctx.ellipse(s.x-z*.02,s.y-z*.04,z*.12,z*.07,-.20,0,Math.PI*2);ctx.fill();
+    }
+
+    if(t===T.SAND&&h>.88&&zoom>=3){
+      ctx.fillStyle="rgba(140,117,67,.55)";
+      ctx.fillRect(s.x-z*.08,s.y,z*.14,z*.14);
+    }
+
+    if(iron[i]>0&&h>.56){
+      ctx.fillStyle="#8f6154";
+      ctx.beginPath();ctx.arc(s.x+z*.05,s.y-z*.06,z*.15,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle="#b58072";
+      ctx.beginPath();ctx.arc(s.x-z*.02,s.y-z*.10,z*.07,0,Math.PI*2);ctx.fill();
+    }
+
+    if(gold[i]>0&&h>.68){
+      ctx.fillStyle="#d4b14e";
+      ctx.beginPath();ctx.arc(s.x-z*.10,s.y-z*.04,z*.13,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle="#f2d87a";
+      ctx.beginPath();ctx.arc(s.x-z*.13,s.y-z*.08,z*.05,0,Math.PI*2);ctx.fill();
+    }
   }
 }
+function drawForestClump(x,y){
+  const s=worldToScreen(x+.5,y+.60),z=clamp(cameraScale(),2.0,6.5),hue=hash(x,y,worldSeed+770);
+  ctx.fillStyle="rgba(0,0,0,.16)";
+  ctx.beginPath();ctx.ellipse(s.x,s.y+z*.26,z*.62,z*.20,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle=hue>.58?"#356d3f":"#2f6338";
+  ctx.beginPath();
+  ctx.arc(s.x-z*.18,s.y-z*.02,z*.24,0,Math.PI*2);
+  ctx.arc(s.x+z*.05,s.y-z*.11,z*.28,0,Math.PI*2);
+  ctx.arc(s.x+z*.22,s.y+z*.01,z*.22,0,Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle="rgba(116,182,104,.55)";
+  ctx.beginPath();ctx.arc(s.x-z*.04,s.y-z*.16,z*.10,0,Math.PI*2);ctx.fill()
+}
+
 function drawTree(x,y){
   const s=worldToScreen(x+.5,y+.56),z=clamp(cameraScale(),2.3,12),sway=Math.sin(tick*.022+x*.64+y*.29)*z*.08,hue=hash(x,y,worldSeed+777);
-  ctx.fillStyle="rgba(0,0,0,.24)";ctx.beginPath();ctx.ellipse(s.x+z*.18,s.y+z*1.0,z*.95,z*.30,-.1,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle=hue>.55?"#6f4f33":"#7b593a";ctx.fillRect(s.x-z*.16,s.y-z*.08,z*.32,z*1.18);
-  ctx.fillStyle=hue>.70?"#2f6a38":hue>.35?"#2b6134":"#356f40";ctx.beginPath();ctx.arc(s.x+sway,s.y-z*.52,z*.82,0,Math.PI*2);ctx.arc(s.x-z*.52+sway,s.y-z*.16,z*.56,0,Math.PI*2);ctx.arc(s.x+z*.50+sway,s.y-z*.14,z*.58,0,Math.PI*2);ctx.arc(s.x+sway,s.y-z*.05,z*.62,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle=hue>.50?"rgba(119,183,102,.70)":"rgba(101,171,95,.68)";ctx.beginPath();ctx.arc(s.x-z*.22+sway,s.y-z*.64,z*.34,0,Math.PI*2);ctx.arc(s.x+z*.24+sway,s.y-z*.50,z*.28,0,Math.PI*2);ctx.fill()
+  if(z<4.9){drawForestClump(x,y);return}
+  ctx.fillStyle="rgba(0,0,0,.24)";
+  ctx.beginPath();ctx.ellipse(s.x+z*.18,s.y+z*.98,z*.95,z*.30,-.1,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle=hue>.55?"#6c4a2f":"#775437";
+  ctx.fillRect(s.x-z*.16,s.y-z*.04,z*.32,z*1.22);
+  ctx.fillStyle=hue>.70?"#2f6a38":hue>.35?"#2c6134":"#356f40";
+  ctx.beginPath();
+  ctx.arc(s.x+sway,s.y-z*.55,z*.86,0,Math.PI*2);
+  ctx.arc(s.x-z*.54+sway,s.y-z*.18,z*.58,0,Math.PI*2);
+  ctx.arc(s.x+z*.52+sway,s.y-z*.16,z*.60,0,Math.PI*2);
+  ctx.arc(s.x+sway,s.y-z*.02,z*.66,0,Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle=hue>.50?"rgba(131,196,110,.72)":"rgba(107,177,100,.68)";
+  ctx.beginPath();
+  ctx.arc(s.x-z*.22+sway,s.y-z*.70,z*.34,0,Math.PI*2);
+  ctx.arc(s.x+z*.24+sway,s.y-z*.54,z*.30,0,Math.PI*2);
+  ctx.arc(s.x-z*.05+sway,s.y-z*.30,z*.24,0,Math.PI*2);
+  ctx.fill()
 }
 function drawTerrainFeatures(){
-  const b=visibleBounds(4),step=zoom<3?3:zoom<4?2:1;
+  const b=visibleBounds(4),camZ=cameraScale(),step=camZ<3?3:camZ<4.5?2:1;
   for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){
-    const i=idx(x,y),t=terrain[i],s=worldToScreen(x+.5,y+.7),z=clamp(cameraScale(),2,11)*.72;
-    if(t===T.FOREST&&trees[i]>0&&hash(x,y,88)>.28)drawTree(x,y);
-    if((t===T.MOUNTAIN||t===T.SNOW)&&hash(x,y,610)>.42){
-      ctx.fillStyle="rgba(0,0,0,.22)";ctx.beginPath();ctx.ellipse(s.x+z*.26,s.y+z*.88,z*1.0,z*.28,0,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle=t===T.SNOW?"#bfc7c6":"#7c817d";ctx.beginPath();ctx.moveTo(s.x-z*.95,s.y+z*.72);ctx.lineTo(s.x-z*.34,s.y-z*.26);ctx.lineTo(s.x,s.y-z*1.28);ctx.lineTo(s.x+z*.42,s.y-z*.20);ctx.lineTo(s.x+z*.95,s.y+z*.72);ctx.fill();
-      ctx.fillStyle=t===T.SNOW?"#edf3f3":"#a5aaa7";ctx.beginPath();ctx.moveTo(s.x,s.y-z*1.28);ctx.lineTo(s.x-z*.28,s.y-z*.62);ctx.lineTo(s.x+z*.18,s.y-z*.54);ctx.lineTo(s.x+z*.36,s.y-z*.18);ctx.fill();
-      ctx.fillStyle="rgba(255,255,255,.14)";ctx.beginPath();ctx.moveTo(s.x-z*.08,s.y-z*.96);ctx.lineTo(s.x+z*.10,s.y-z*.58);ctx.lineTo(s.x+z*.28,s.y-z*.86);ctx.fill()
+    const i=idx(x,y),t=terrain[i],s=worldToScreen(x+.5,y+.7),z=clamp(camZ,2,11)*.72;
+    if(t===T.FOREST&&trees[i]>0){
+      if(camZ<4.7){
+        if(hash(x,y,88)>.44)drawForestClump(x,y)
+      }else if(hash(x,y,88)>.24)drawTree(x,y)
+    }
+    if((t===T.MOUNTAIN||t===T.SNOW)&&hash(x,y,610)>.40){
+      ctx.fillStyle="rgba(0,0,0,.22)";
+      ctx.beginPath();ctx.ellipse(s.x+z*.26,s.y+z*.88,z*1.0,z*.28,0,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle=t===T.SNOW?"#c7d0d3":"#7b817c";
+      ctx.beginPath();
+      ctx.moveTo(s.x-z*.95,s.y+z*.72);
+      ctx.lineTo(s.x-z*.34,s.y-z*.26);
+      ctx.lineTo(s.x,s.y-z*1.28);
+      ctx.lineTo(s.x+z*.42,s.y-z*.20);
+      ctx.lineTo(s.x+z*.95,s.y+z*.72);
+      ctx.fill();
+      ctx.fillStyle=t===T.SNOW?"#eff5f6":"#aab0ad";
+      ctx.beginPath();
+      ctx.moveTo(s.x,s.y-z*1.28);
+      ctx.lineTo(s.x-z*.28,s.y-z*.62);
+      ctx.lineTo(s.x+z*.18,s.y-z*.54);
+      ctx.lineTo(s.x+z*.36,s.y-z*.18);
+      ctx.fill();
+      ctx.fillStyle="rgba(255,255,255,.14)";
+      ctx.beginPath();
+      ctx.moveTo(s.x-z*.08,s.y-z*.96);
+      ctx.lineTo(s.x+z*.10,s.y-z*.58);
+      ctx.lineTo(s.x+z*.28,s.y-z*.86);
+      ctx.fill();
     }
   }
 }
@@ -1162,16 +1336,49 @@ function drawPerson(p){
   if(!p.alive)return;
   const s=worldToScreen(p.px,p.py),base=clamp(cameraScale(),3,12),child=p.age<14,scale=child?.72:1,z=base*scale,bob=Math.sin(p.phase)*z*.10;
   const skins=["#f0c18b","#d9a06d","#b9784f","#7d4e35"],shirts=["#7a5d45","#4c7280","#7e844c","#7f6171","#466f60","#6d5c86"],hairs=["#36251d","#65452f","#1e1c1b","#956f3d","#6d342c"];
-  ctx.fillStyle="rgba(0,0,0,.25)";ctx.beginPath();ctx.ellipse(s.x+z*.14,s.y+z*1.42,z*.80,z*.28,0,0,Math.PI*2);ctx.fill();
-  ctx.strokeStyle="rgba(25,20,18,.35)";ctx.lineWidth=Math.max(1,z*.08);ctx.beginPath();ctx.moveTo(s.x-z*.24,s.y+z*.76+bob);ctx.lineTo(s.x-z*.18,s.y+z*1.34+bob);ctx.moveTo(s.x+z*.24,s.y+z*.76+bob);ctx.lineTo(s.x+z*.18,s.y+z*1.34+bob);ctx.stroke();
-  ctx.fillStyle=shirts[p.shirt];ctx.fillRect(s.x-z*.58,s.y-z*.08+bob,z*1.16,z*1.28);
-  ctx.fillStyle=skins[p.skin];ctx.beginPath();ctx.arc(s.x,s.y-z*.68+bob,z*.48,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle=hairs[p.hair];ctx.beginPath();ctx.arc(s.x,s.y-z*.82+bob,z*.52,Math.PI,Math.PI*2);ctx.fill();
-  ctx.fillStyle="#2a221f";ctx.beginPath();ctx.arc(s.x+(p.dir>0?z*.12:-z*.12),s.y-z*.70+bob,z*.06,0,Math.PI*2);ctx.fill();
-  ctx.strokeStyle=skins[p.skin];ctx.lineWidth=Math.max(1,z*.08);ctx.beginPath();ctx.moveTo(s.x-z*.56,s.y+z*.18+bob);ctx.lineTo(s.x-z*.88,s.y+z*.42+bob);ctx.moveTo(s.x+z*.56,s.y+z*.18+bob);ctx.lineTo(s.x+z*.88,s.y+z*.42+bob);ctx.stroke();
-  if(p.carryAmount>0){ctx.fillStyle=p.carryType==="food"?"#cf5044":p.carryType==="wood"?"#8a5a36":p.carryType==="iron"?"#a66b5e":p.carryType==="gold"?"#dfc55b":p.carryType==="coal"?"#27272a":"#96a0a4";ctx.beginPath();ctx.arc(s.x+p.dir*z*.92,s.y+z*.22,z*.28,0,Math.PI*2);ctx.fill()}
-  if(p.id===selected){ctx.strokeStyle="#f7ffed";ctx.lineWidth=2;ctx.beginPath();ctx.arc(s.x,s.y,z*2.05,0,Math.PI*2);ctx.stroke();ctx.fillStyle="rgba(177,231,138,.16)";ctx.beginPath();ctx.arc(s.x,s.y,z*2.05,0,Math.PI*2);ctx.fill()}
-  if(settings.labels&&zoom>=6&&!child){ctx.font=`700 ${Math.round(base*1.16)}px -apple-system,system-ui`;ctx.textAlign="center";ctx.strokeStyle="rgba(0,0,0,.45)";ctx.lineWidth=Math.max(2,base*.26);ctx.strokeText(p.name,s.x,s.y-z*2.06);ctx.fillStyle="#fbfffb";ctx.fillText(p.name,s.x,s.y-z*2.06)}
+  ctx.fillStyle="rgba(0,0,0,.22)";
+  ctx.beginPath();ctx.ellipse(s.x+z*.14,s.y+z*1.42,z*.84,z*.30,0,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="rgba(25,20,18,.35)";
+  ctx.lineWidth=Math.max(1,z*.08);
+  ctx.beginPath();
+  ctx.moveTo(s.x-z*.24,s.y+z*.76+bob);ctx.lineTo(s.x-z*.18,s.y+z*1.34+bob);
+  ctx.moveTo(s.x+z*.24,s.y+z*.76+bob);ctx.lineTo(s.x+z*.18,s.y+z*1.34+bob);
+  ctx.stroke();
+  const bodyGrad=ctx.createLinearGradient(s.x,s.y-z*.08+bob,s.x,s.y+z*1.20+bob);
+  bodyGrad.addColorStop(0,shirts[p.shirt]);bodyGrad.addColorStop(1,"rgba(20,20,20,.18)");
+  ctx.fillStyle=bodyGrad;
+  ctx.fillRect(s.x-z*.58,s.y-z*.08+bob,z*1.16,z*1.28);
+  ctx.fillStyle=skins[p.skin];
+  ctx.beginPath();ctx.arc(s.x,s.y-z*.68+bob,z*.48,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle=hairs[p.hair];
+  ctx.beginPath();ctx.arc(s.x,s.y-z*.82+bob,z*.52,Math.PI,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#2a221f";
+  ctx.beginPath();ctx.arc(s.x+(p.dir>0?z*.12:-z*.12),s.y-z*.70+bob,z*.06,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle=skins[p.skin];
+  ctx.lineWidth=Math.max(1,z*.08);
+  ctx.beginPath();
+  ctx.moveTo(s.x-z*.56,s.y+z*.18+bob);ctx.lineTo(s.x-z*.88,s.y+z*.42+bob);
+  ctx.moveTo(s.x+z*.56,s.y+z*.18+bob);ctx.lineTo(s.x+z*.88,s.y+z*.42+bob);
+  ctx.stroke();
+  if(p.carryAmount>0){
+    ctx.fillStyle=p.carryType==="food"?"#cf5044":p.carryType==="wood"?"#8a5a36":p.carryType==="iron"?"#a66b5e":p.carryType==="gold"?"#dfc55b":p.carryType==="coal"?"#27272a":"#96a0a4";
+    ctx.beginPath();ctx.arc(s.x+p.dir*z*.92,s.y+z*.22,z*.28,0,Math.PI*2);ctx.fill()
+  }
+  if(p.id===selected){
+    ctx.strokeStyle="#f7ffed";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(s.x,s.y,z*2.05,0,Math.PI*2);ctx.stroke();
+    ctx.fillStyle="rgba(177,231,138,.16)";
+    ctx.beginPath();ctx.arc(s.x,s.y,z*2.05,0,Math.PI*2);ctx.fill()
+  }
+  if(settings.labels&&zoom>=6.6&&!child){
+    ctx.font=`700 ${Math.round(base*1.12)}px -apple-system,system-ui`;
+    ctx.textAlign="center";
+    ctx.strokeStyle="rgba(0,0,0,.45)";
+    ctx.lineWidth=Math.max(2,base*.26);
+    ctx.strokeText(p.name,s.x,s.y-z*2.06);
+    ctx.fillStyle="#fbfffb";
+    ctx.fillText(p.name,s.x,s.y-z*2.06)
+  }
 }
 function drawUndergroundResources(){
   const b=visibleBounds(3),step=zoom<3?3:zoom<5?2:1,z=cameraScale();
@@ -1216,7 +1423,7 @@ function drawVignette(){
 function renderUnderground(){
   if(undergroundDirty)rebuildUnderground();clampCamera();ctx.fillStyle="#171312";ctx.fillRect(0,0,canvas.width,canvas.height);
   const s=cameraScale(),v=viewportWorldSize(),viewLeft=camX-v.w/2,viewTop=camY-v.h/2,wl=Math.max(0,viewLeft),wt=Math.max(0,viewTop),wr=Math.min(WORLD_W,viewLeft+v.w),wb=Math.min(WORLD_H,viewTop+v.h);
-  if(wr>wl&&wb>wt){ctx.imageSmoothingEnabled=true;ctx.drawImage(undergroundCanvas,wl*TEX,wt*TEX,(wr-wl)*TEX,(wb-wt)*TEX,(wl-viewLeft)*s,(wt-viewTop)*s,(wr-wl)*s,(wb-wt)*s)}
+  if(wr>wl&&wb>wt){ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";ctx.drawImage(undergroundCanvas,wl*TEX,wt*TEX,(wr-wl)*TEX,(wb-wt)*TEX,(wl-viewLeft)*s,(wt-viewTop)*s,(wr-wl)*s,(wb-wt)*s)}
   drawUndergroundResources();buildingsOf("mine").forEach(drawMineShaftUnderground);people.filter(p=>p.layer==="underground").sort((a,b)=>a.py-b.py).forEach(drawPerson);if(settings.effects)drawParticles();
   const topGlow=ctx.createLinearGradient(0,0,0,canvas.height*.28);topGlow.addColorStop(0,"rgba(255,190,88,.08)");topGlow.addColorStop(1,"rgba(0,0,0,0)");ctx.fillStyle=topGlow;ctx.fillRect(0,0,canvas.width,canvas.height);drawVignette();drawMiniMap()
 }
@@ -1251,7 +1458,7 @@ function render(){
   if(activeLayer==="underground"){renderUnderground();return}
   if(dirty)rebuildTerrain();clampCamera();ctx.fillStyle="#1c4f6f";ctx.fillRect(0,0,canvas.width,canvas.height);
   const s=cameraScale(),v=viewportWorldSize(),viewLeft=camX-v.w/2,viewTop=camY-v.h/2,wl=Math.max(0,viewLeft),wt=Math.max(0,viewTop),wr=Math.min(WORLD_W,viewLeft+v.w),wb=Math.min(WORLD_H,viewTop+v.h);
-  if(wr>wl&&wb>wt){ctx.imageSmoothingEnabled=true;ctx.drawImage(terrainCanvas,wl*TEX,wt*TEX,(wr-wl)*TEX,(wb-wt)*TEX,(wl-viewLeft)*s,(wt-viewTop)*s,(wr-wl)*s,(wb-wt)*s)}
+  if(wr>wl&&wb>wt){ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";ctx.drawImage(terrainCanvas,wl*TEX,wt*TEX,(wr-wl)*TEX,(wb-wt)*TEX,(wl-viewLeft)*s,(wt-viewTop)*s,(wr-wl)*s,(wb-wt)*s)}
   drawSurfaceAtmosphere();drawWater();if(settings.trails)drawTrails();drawGroundDetails();drawHazards();drawTerrainFeatures();buildings.slice().sort((a,b)=>a.y-b.y).forEach(drawBuilding);critters.slice().sort((a,b)=>a.py-b.py).forEach(drawCritter);people.filter(p=>p.layer!=="underground").sort((a,b)=>a.py-b.py).forEach(drawPerson);if(settings.effects)drawParticles();drawClouds();drawLighting();drawVignette();drawMiniMap()
 }
 function eraName(){const pop=people.filter(p=>p.alive).length;if(pop>=18)return"Village";if(pop>=10)return"Hamlet";if(pop>=5)return"Growing Camp";if(buildingsOf("hut").length)return"Early Settlement";return"Primitive"}
@@ -1423,8 +1630,8 @@ function settingsHtml(){
   <div class="menuSection">World management</div><button class="bigAction" data-action="center-world" type="button">⌾ Center on First Hearth</button><button class="bigAction" data-action="open-world-creator" type="button">🌍 Open World Creator</button><button class="bigAction danger" data-action="open-world-reset" type="button">↺ Reset Current World</button>`
 }
 function updatesHtml(){
-  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V6 · Living Civilization</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
-  <div class="updateItem"><b>V6 — Living Civilization</b><small>Current</small><p>Citizens now age through life stages, learn as children, build job skills, change careers more intelligently, form households, accumulate wealth and possessions, develop friendships and rivals, experience grief, inherit traits, grow old and die naturally. The World menu now includes a persistent Family Registry.</p></div><div class="updateItem"><b>V5.4 — World Scale</b><small>Previous</small><p>Dynamic 100×100 through 500×500 world sizes.</p></div><div class="updateItem"><b>V5.3 — Family & Marriage</b><small>Previous</small><p>Dating, emotional bonds, marriage, shared surnames, breakups and child surname inheritance.</p></div><div class="updateItem"><b>V5.2 — Responsive World</b><small>Previous</small><p>Responsive landscape catalogs, smaller wording and procedural unique names.</p></div><div class="updateItem"><b>V5.1 — Living World</b><small>Previous</small><p>Compact HUD, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs and relationships.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
+  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V6.5 · Grand Graphics Overhaul</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
+  <div class="updateItem"><b>V6.5 — Grand Graphics Overhaul</b><small>Current</small><p>The world surface has been visually rebuilt with sharper land texturing, richer biome color, animated wave motion, improved shoreline foam, bush-like food clusters, cleaner low-zoom forest rendering and stronger visual grounding between the land and the citizens.</p></div><div class="updateItem"><b>V6 — Living Civilization</b><small>Previous</small><p>Citizens age, learn, build skills, form households, create families, experience grief and leave a lineage behind.</p></div><div class="updateItem"><b>V5.4 — World Scale</b><small>Previous</small><p>Dynamic 100×100 through 500×500 world sizes.</p></div><div class="updateItem"><b>V5.3 — Family & Marriage</b><small>Previous</small><p>Dating, emotional bonds, marriage, shared surnames, breakups and child surname inheritance.</p></div><div class="updateItem"><b>V5.2 — Responsive World</b><small>Previous</small><p>Responsive landscape catalogs, smaller wording and procedural unique names.</p></div><div class="updateItem"><b>V5.1 — Living World</b><small>Previous</small><p>Compact HUD, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs and relationships.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
   <div class="updateItem"><b>V4.1 — Underground</b><small>Previous</small><p>Surface/Underground toggle, caves, deep stone, underground lakes, magma, iron/gold/coal/crystal veins, mine entrances, tunneling miners and layer-aware god powers.</p></div>
   <div class="updateItem"><b>V4 — World Control</b><small>Previous</small><p>World, God Powers and Resources tabs; full people/village/history/settings panels; biome painting; fire and lava; iron and gold; wildlife; direct people spawning; persistent visual settings.</p></div>
   <div class="updateItem"><b>V3 — Civilization</b><small>Previous</small><p>Families, jobs, farms, stockpiles, building construction, discoveries and village growth.</p></div>

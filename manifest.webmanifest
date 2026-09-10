@@ -1,7 +1,7 @@
 {
   "name": "Tiny World",
   "short_name": "Tiny World",
-  "description": "A living civilization sandbox where citizens age, learn, form families, build skills, make friends and rivals, grieve, work, grow old and leave histories behind.",
+  "description": "Tiny World V6.5 adds a major visual upgrade: sharper terrain, richer biomes, animated waves, better shoreline foam, improved bushes and lower-zoom forest rendering.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
