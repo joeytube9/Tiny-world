@@ -59,6 +59,8 @@ let settings={labels:true,trails:true,dayNight:true,effects:true};try{settings=O
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),idx=(x,y)=>y*WORLD_W+x,rnd=(a,b)=>a+Math.random()*(b-a),rndi=(a,b)=>Math.floor(rnd(a,b+1)),lerp=(a,b,t)=>a+(b-a)*t;
 function mixColor(a,b,t){return[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t]}
 function textureScaleForWorld(size){return size<=100?5:size<=150?5:size<=200?4:size<=300?3:2}
+function isWaterTile(t){return t===T.WATER||t===T.DEEP}
+function isLandTile(t){return !isWaterTile(t)}
 
 function hash(x,y,s=0){let n=(x*374761393+y*668265263+s*1442695041)|0;n=(n^(n>>13))*1274126177;return((n^(n>>16))>>>0)/4294967295}
 function fade(t){return t*t*(3-2*t)}
@@ -1121,36 +1123,60 @@ function generate(useExistingSeed=false){
 }
 
 function drawTrails(){const b=visibleBounds(2),step=zoom<3?3:zoom<4?2:1;ctx.save();ctx.lineCap="round";for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){const v=trail[idx(x,y)];if(v<12)continue;const s=worldToScreen(x+.5,y+.5),z=cameraScale();ctx.fillStyle=v>80?"rgba(118,88,55,.52)":`rgba(135,103,67,${Math.min(.38,v/230)})`;ctx.beginPath();ctx.ellipse(s.x,s.y,Math.max(1.4,z*.48),Math.max(1,z*.22),hash(x,y,9)*Math.PI,0,Math.PI*2);ctx.fill()}ctx.restore()}
-function drawWater(){
-  const b=visibleBounds(2),step=zoom<3?5:zoom<5?3:2,z=cameraScale();
+function drawCoastalBlend(){
+  const b=visibleBounds(2),z=cameraScale(),phase=tick*.06;
   ctx.save();
-  ctx.lineCap="round";
+  for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y++)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x++){
+    const i=idx(x,y),t=terrain[i],shore=shorelineFactor(x,y);
+    if(shore<.18)continue;
+    const s=worldToScreen(x+.5,y+.5);
+    if(isWaterTile(t)){
+      const swell=(Math.sin(phase+x*.72+y*.24)+Math.sin(phase*.78-x*.28+y*.46))*0.5;
+      const drift=Math.sin(phase*1.25+x*.30-y*.18);
+      ctx.fillStyle=`rgba(121,201,224,${.05+shore*.10})`;
+      ctx.beginPath();ctx.arc(s.x+swell*z*.10,s.y+drift*z*.05,z*(.42+shore*.40),0,Math.PI*2);ctx.fill();
+      if(shore>.24){
+        ctx.fillStyle=`rgba(246,252,249,${.04+shore*.10})`;
+        ctx.beginPath();ctx.ellipse(s.x+swell*z*.15,s.y-drift*z*.04,z*(.20+shore*.28),z*(.08+shore*.12),hash(x,y,worldSeed+930)*Math.PI,0,Math.PI*2);ctx.fill();
+      }
+    }else if(t===T.GRASS||t===T.FOREST||t===T.SAND){
+      const tint=t===T.SAND?`rgba(235,215,155,${.03+shore*.05})`:`rgba(113,170,98,${.03+shore*.05})`;
+      ctx.fillStyle=tint;
+      ctx.beginPath();ctx.arc(s.x,s.y,z*(.36+shore*.20),0,Math.PI*2);ctx.fill();
+    }
+  }
+  ctx.restore()
+}
+function drawWater(){
+  const b=visibleBounds(2),step=zoom<3?4:zoom<5?2:1,z=cameraScale(),phase=tick*.12;
+  ctx.save();ctx.lineCap="round";
   for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){
-    const t=terrain[idx(x,y)];if(t!==T.WATER&&t!==T.DEEP)continue;
+    const i=idx(x,y),t=terrain[i];if(!isWaterTile(t))continue;
     const s=worldToScreen(x+.5,y+.5),shore=shorelineFactor(x,y);
-    const waveA=Math.sin(tick*.090+x*.62+y*.24),waveB=Math.sin(tick*.056-x*.18+y*.45),wave=(waveA+waveB)*.5;
-    if(hash(x,y,worldSeed+333)>.32){
-      const len=z*(.22+hash(x,y,worldSeed+334)*.52);
-      const alpha=(t===T.WATER?.15:.10)+shore*.17;
-      ctx.strokeStyle=`rgba(236,247,252,${alpha})`;
-      ctx.lineWidth=Math.max(1,z*.075);
-      ctx.beginPath();
-      ctx.moveTo(s.x-len,s.y+wave*z*.12);
-      ctx.quadraticCurveTo(s.x,s.y-wave*z*.14,s.x+len,s.y+wave*z*.08);
-      ctx.stroke();
+    const wave=Math.sin(phase+x*.65+y*.22),wave2=Math.cos(phase*.76-x*.28+y*.47),tide=.5+.5*Math.sin(phase*.42+x*.09+y*.05);
+    if(shore>.08){
+      ctx.fillStyle=`rgba(136,210,231,${.06+shore*.12})`;
+      ctx.beginPath();ctx.arc(s.x+wave*z*.08,s.y+wave2*z*.05,z*(.26+shore*.28+tide*.05),0,Math.PI*2);ctx.fill();
     }
-    if(hash(x,y,worldSeed+338)>.80&&z>3.3){
-      ctx.fillStyle=`rgba(255,255,255,${.05+shore*.10})`;
-      ctx.beginPath();
-      ctx.arc(s.x+waveA*z*.06,s.y+waveB*z*.06,Math.max(.7,z*.05),0,Math.PI*2);
-      ctx.fill();
-    }
-    if(shore>.18&&hash(x,y,worldSeed+335)>.26){
-      ctx.strokeStyle=`rgba(247,253,249,${.08+shore*.18})`;
+    if(hash(x,y,worldSeed+333)>.22){
+      const len=z*(.26+hash(x,y,worldSeed+334)*.52+shore*.15);
+      ctx.strokeStyle=`rgba(239,248,252,${(t===T.WATER?.12:.08)+shore*.20})`;
       ctx.lineWidth=Math.max(1,z*.08);
       ctx.beginPath();
-      ctx.arc(s.x,s.y,z*(.08+shore*.12),0,Math.PI*2);
+      ctx.moveTo(s.x-len,s.y+wave*z*.10);
+      ctx.quadraticCurveTo(s.x,s.y-wave2*z*.16,s.x+len,s.y+wave*z*.06);
       ctx.stroke();
+    }
+    if(shore>.22&&hash(x,y,worldSeed+335)>.28){
+      ctx.strokeStyle=`rgba(250,253,248,${.07+shore*.20})`;
+      ctx.lineWidth=Math.max(1,z*.08);
+      ctx.beginPath();
+      ctx.arc(s.x+wave*z*.10,s.y+wave2*z*.06,z*(.10+shore*.16+tide*.03),0,Math.PI*2);
+      ctx.stroke();
+    }
+    if(t===T.DEEP&&hash(x,y,worldSeed+336)>.70){
+      ctx.fillStyle='rgba(255,255,255,.03)';
+      ctx.fillRect(s.x-z*.20+wave*z*.05,s.y+wave2*z*.12,z*.40,Math.max(1,z*.04));
     }
   }
   ctx.restore()
@@ -1334,51 +1360,37 @@ function drawBuilding(b){
 }
 function drawPerson(p){
   if(!p.alive)return;
-  const s=worldToScreen(p.px,p.py),base=clamp(cameraScale(),3,12),child=p.age<14,scale=child?.72:1,z=base*scale,bob=Math.sin(p.phase)*z*.10;
-  const skins=["#f0c18b","#d9a06d","#b9784f","#7d4e35"],shirts=["#7a5d45","#4c7280","#7e844c","#7f6171","#466f60","#6d5c86"],hairs=["#36251d","#65452f","#1e1c1b","#956f3d","#6d342c"];
-  ctx.fillStyle="rgba(0,0,0,.22)";
-  ctx.beginPath();ctx.ellipse(s.x+z*.14,s.y+z*1.42,z*.84,z*.30,0,0,Math.PI*2);ctx.fill();
-  ctx.strokeStyle="rgba(25,20,18,.35)";
-  ctx.lineWidth=Math.max(1,z*.08);
-  ctx.beginPath();
-  ctx.moveTo(s.x-z*.24,s.y+z*.76+bob);ctx.lineTo(s.x-z*.18,s.y+z*1.34+bob);
-  ctx.moveTo(s.x+z*.24,s.y+z*.76+bob);ctx.lineTo(s.x+z*.18,s.y+z*1.34+bob);
-  ctx.stroke();
-  const bodyGrad=ctx.createLinearGradient(s.x,s.y-z*.08+bob,s.x,s.y+z*1.20+bob);
-  bodyGrad.addColorStop(0,shirts[p.shirt]);bodyGrad.addColorStop(1,"rgba(20,20,20,.18)");
+  const s=worldToScreen(p.px,p.py),base=clamp(cameraScale(),3,14),child=p.age<14,scale=child?.76:1,z=base*scale,bob=Math.sin(p.phase)*z*.08;
+  const skins=["#f1c494","#dca372","#be7e56","#7d4d36"],tunics=["#587a95","#7e8450","#7a5e47","#6d5f88","#4d7968","#9a6b59"],hairs=["#251d1a","#5c3f2b","#1b1a19","#8a6739","#6a2f29"];
+  ctx.fillStyle='rgba(0,0,0,.20)';ctx.beginPath();ctx.ellipse(s.x+z*.10,s.y+z*1.22,z*.72,z*.24,0,0,Math.PI*2);ctx.fill();
+  const bodyGrad=ctx.createLinearGradient(s.x,s.y-z*.10+bob,s.x,s.y+z*1.20+bob);bodyGrad.addColorStop(0,tunics[p.shirt]);bodyGrad.addColorStop(1,'rgba(18,18,18,.12)');
   ctx.fillStyle=bodyGrad;
-  ctx.fillRect(s.x-z*.58,s.y-z*.08+bob,z*1.16,z*1.28);
-  ctx.fillStyle=skins[p.skin];
-  ctx.beginPath();ctx.arc(s.x,s.y-z*.68+bob,z*.48,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle=hairs[p.hair];
-  ctx.beginPath();ctx.arc(s.x,s.y-z*.82+bob,z*.52,Math.PI,Math.PI*2);ctx.fill();
-  ctx.fillStyle="#2a221f";
-  ctx.beginPath();ctx.arc(s.x+(p.dir>0?z*.12:-z*.12),s.y-z*.70+bob,z*.06,0,Math.PI*2);ctx.fill();
-  ctx.strokeStyle=skins[p.skin];
-  ctx.lineWidth=Math.max(1,z*.08);
   ctx.beginPath();
-  ctx.moveTo(s.x-z*.56,s.y+z*.18+bob);ctx.lineTo(s.x-z*.88,s.y+z*.42+bob);
-  ctx.moveTo(s.x+z*.56,s.y+z*.18+bob);ctx.lineTo(s.x+z*.88,s.y+z*.42+bob);
+  ctx.moveTo(s.x-z*.48,s.y-z*.02+bob);ctx.lineTo(s.x+z*.48,s.y-z*.02+bob);ctx.lineTo(s.x+z*.34,s.y+z*.92+bob);ctx.lineTo(s.x-z*.34,s.y+z*.92+bob);ctx.closePath();ctx.fill();
+  ctx.strokeStyle='rgba(255,255,255,.10)';ctx.lineWidth=Math.max(1,z*.05);ctx.beginPath();ctx.moveTo(s.x,s.y-z*.02+bob);ctx.lineTo(s.x,s.y+z*.90+bob);ctx.stroke();
+  ctx.strokeStyle=skins[p.skin];ctx.lineWidth=Math.max(1,z*.08);
+  ctx.beginPath();
+  ctx.moveTo(s.x-z*.20,s.y+z*.92+bob);ctx.lineTo(s.x-z*.18,s.y+z*1.34+bob);
+  ctx.moveTo(s.x+z*.20,s.y+z*.92+bob);ctx.lineTo(s.x+z*.18,s.y+z*1.34+bob);
+  ctx.moveTo(s.x-z*.46,s.y+z*.16+bob);ctx.lineTo(s.x-z*.78,s.y+z*.44+bob);
+  ctx.moveTo(s.x+z*.46,s.y+z*.16+bob);ctx.lineTo(s.x+z*.78,s.y+z*.44+bob);
   ctx.stroke();
+  ctx.fillStyle=skins[p.skin];ctx.beginPath();ctx.arc(s.x,s.y-z*.62+bob,z*.38,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle=hairs[p.hair];ctx.beginPath();ctx.arc(s.x,s.y-z*.72+bob,z*.42,Math.PI,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.moveTo(s.x-z*.28,s.y-z*.60+bob);ctx.lineTo(s.x-z*.10,s.y-z*.92+bob);ctx.lineTo(s.x,s.y-z*.64+bob);ctx.fill();
+  if(base>4.3){ctx.beginPath();ctx.moveTo(s.x+z*.28,s.y-z*.60+bob);ctx.lineTo(s.x+z*.10,s.y-z*.92+bob);ctx.lineTo(s.x,s.y-z*.64+bob);ctx.fill()}
+  if(base>6){
+    ctx.fillStyle='#2c231f';
+    ctx.beginPath();ctx.arc(s.x-z*.10,s.y-z*.62+bob,z*.03,0,Math.PI*2);ctx.arc(s.x+z*.10,s.y-z*.62+bob,z*.03,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='rgba(90,54,44,.45)';ctx.lineWidth=Math.max(1,z*.04);ctx.beginPath();ctx.moveTo(s.x-z*.08,s.y-z*.48+bob);ctx.quadraticCurveTo(s.x,s.y-z*.42+bob,s.x+z*.08,s.y-z*.48+bob);ctx.stroke();
+  }
   if(p.carryAmount>0){
-    ctx.fillStyle=p.carryType==="food"?"#cf5044":p.carryType==="wood"?"#8a5a36":p.carryType==="iron"?"#a66b5e":p.carryType==="gold"?"#dfc55b":p.carryType==="coal"?"#27272a":"#96a0a4";
-    ctx.beginPath();ctx.arc(s.x+p.dir*z*.92,s.y+z*.22,z*.28,0,Math.PI*2);ctx.fill()
+    ctx.fillStyle=p.carryType==='food'?'#c74f45':p.carryType==='wood'?'#8c5c38':p.carryType==='iron'?'#a66d60':p.carryType==='gold'?'#ddc15b':p.carryType==='coal'?'#2e2e31':'#97a1a5';
+    ctx.beginPath();ctx.ellipse(s.x+p.dir*z*.86,s.y+z*.24,z*.22,z*.18,0,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,.15)';ctx.lineWidth=Math.max(1,z*.04);ctx.beginPath();ctx.moveTo(s.x+p.dir*z*.70,s.y+z*.16);ctx.lineTo(s.x+p.dir*z*.90,s.y+z*.30);ctx.stroke();
   }
-  if(p.id===selected){
-    ctx.strokeStyle="#f7ffed";ctx.lineWidth=2;
-    ctx.beginPath();ctx.arc(s.x,s.y,z*2.05,0,Math.PI*2);ctx.stroke();
-    ctx.fillStyle="rgba(177,231,138,.16)";
-    ctx.beginPath();ctx.arc(s.x,s.y,z*2.05,0,Math.PI*2);ctx.fill()
-  }
-  if(settings.labels&&zoom>=6.6&&!child){
-    ctx.font=`700 ${Math.round(base*1.12)}px -apple-system,system-ui`;
-    ctx.textAlign="center";
-    ctx.strokeStyle="rgba(0,0,0,.45)";
-    ctx.lineWidth=Math.max(2,base*.26);
-    ctx.strokeText(p.name,s.x,s.y-z*2.06);
-    ctx.fillStyle="#fbfffb";
-    ctx.fillText(p.name,s.x,s.y-z*2.06)
-  }
+  if(p.id===selected){ctx.strokeStyle='#f7ffed';ctx.lineWidth=2;ctx.beginPath();ctx.arc(s.x,s.y,z*1.8,0,Math.PI*2);ctx.stroke();ctx.fillStyle='rgba(177,231,138,.12)';ctx.beginPath();ctx.arc(s.x,s.y,z*1.8,0,Math.PI*2);ctx.fill()}
+  if(settings.labels&&zoom>=7.1&&!child){ctx.font=`700 ${Math.round(base*1.05)}px -apple-system,system-ui`;ctx.textAlign='center';ctx.strokeStyle='rgba(0,0,0,.45)';ctx.lineWidth=Math.max(2,base*.24);ctx.strokeText(p.name,s.x,s.y-z*1.86);ctx.fillStyle='#fbfffb';ctx.fillText(p.name,s.x,s.y-z*1.86)}
 }
 function drawUndergroundResources(){
   const b=visibleBounds(3),step=zoom<3?3:zoom<5?2:1,z=cameraScale();
@@ -1428,13 +1440,34 @@ function renderUnderground(){
   const topGlow=ctx.createLinearGradient(0,0,0,canvas.height*.28);topGlow.addColorStop(0,"rgba(255,190,88,.08)");topGlow.addColorStop(1,"rgba(0,0,0,0)");ctx.fillStyle=topGlow;ctx.fillRect(0,0,canvas.width,canvas.height);drawVignette();drawMiniMap()
 }
 function drawCritter(c){
-  const s=worldToScreen(c.px,c.py),z=clamp(cameraScale(),2.8,10),bob=Math.sin(c.phase)*z*.06,body=c.type==="deer"?"#8f613d":c.type==="sheep"?"#dad7ca":"#6c7278",head=c.type==="sheep"?"#4f4b45":c.type==="wolf"?"#555c61":body;
-  ctx.fillStyle="rgba(0,0,0,.20)";ctx.beginPath();ctx.ellipse(s.x+z*.15,s.y+z*.72,z*.86,z*.24,0,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle=body;ctx.beginPath();ctx.ellipse(s.x,s.y+bob,z*.68,z*.44,0,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle=head;ctx.beginPath();ctx.arc(s.x+c.dir*z*.66,s.y-z*.16+bob,z*.28,0,Math.PI*2);ctx.fill();
-  ctx.strokeStyle=head;ctx.lineWidth=Math.max(1,z*.09);for(const lx of[-.35,.25]){ctx.beginPath();ctx.moveTo(s.x+lx*z,s.y+z*.24+bob);ctx.lineTo(s.x+lx*z,s.y+z*.74+bob);ctx.stroke()}
-  if(c.type==="deer"){ctx.strokeStyle="#5d4030";ctx.beginPath();ctx.moveTo(s.x+c.dir*z*.72,s.y-z*.42+bob);ctx.lineTo(s.x+c.dir*z*.86,s.y-z*.72+bob);ctx.moveTo(s.x+c.dir*z*.72,s.y-z*.42+bob);ctx.lineTo(s.x+c.dir*z*.58,s.y-z*.68+bob);ctx.stroke()}
-  if(c.type==="sheep"){ctx.fillStyle="rgba(255,255,255,.30)";ctx.beginPath();ctx.arc(s.x-z*.08,s.y-z*.05+bob,z*.20,0,Math.PI*2);ctx.arc(s.x+z*.16,s.y+bob,z*.18,0,Math.PI*2);ctx.fill()}
+  const s=worldToScreen(c.px,c.py),base=clamp(cameraScale(),2.8,12),z=base,bob=Math.sin(c.phase)*z*.05,dir=c.dir||1;
+  ctx.fillStyle='rgba(0,0,0,.18)';ctx.beginPath();ctx.ellipse(s.x+z*.08,s.y+z*.64,z*.76,z*.20,0,0,Math.PI*2);ctx.fill();
+  if(c.type==='sheep'){
+    ctx.fillStyle='#ece7db';
+    ctx.beginPath();ctx.arc(s.x-z*.18,s.y-z*.02+bob,z*.24,0,Math.PI*2);ctx.arc(s.x+.02*z,s.y-z*.10+bob,z*.26,0,Math.PI*2);ctx.arc(s.x+z*.22,s.y+bob,z*.24,0,Math.PI*2);ctx.arc(s.x,s.y+z*.08+bob,z*.28,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#555049';ctx.beginPath();ctx.ellipse(s.x+dir*z*.48,s.y-z*.06+bob,z*.20,z*.16,0,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.moveTo(s.x+dir*z*.40,s.y-z*.16+bob);ctx.lineTo(s.x+dir*z*.52,s.y-z*.32+bob);ctx.lineTo(s.x+dir*z*.60,s.y-z*.14+bob);ctx.fill();
+    ctx.beginPath();ctx.moveTo(s.x+dir*z*.34,s.y-z*.12+bob);ctx.lineTo(s.x+dir*z*.46,s.y-z*.28+bob);ctx.lineTo(s.x+dir*z*.54,s.y-z*.10+bob);ctx.fill();
+    ctx.strokeStyle='#6a645c';ctx.lineWidth=Math.max(1,z*.08);for(const lx of[-.22,0,.22]){ctx.beginPath();ctx.moveTo(s.x+lx*z,s.y+z*.16+bob);ctx.lineTo(s.x+lx*z,s.y+z*.58+bob);ctx.stroke()}
+    ctx.fillStyle='rgba(255,255,255,.35)';ctx.beginPath();ctx.arc(s.x-z*.08,s.y-z*.10+bob,z*.08,0,Math.PI*2);ctx.fill();
+    return;
+  }
+  if(c.type==='wolf'){
+    ctx.fillStyle='#697176';ctx.beginPath();ctx.ellipse(s.x,s.y+bob,z*.52,z*.28,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#52595d';ctx.beginPath();ctx.ellipse(s.x+dir*z*.48,s.y-z*.08+bob,z*.22,z*.16,0,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.moveTo(s.x+dir*z*.40,s.y-z*.14+bob);ctx.lineTo(s.x+dir*z*.52,s.y-z*.36+bob);ctx.lineTo(s.x+dir*z*.62,s.y-z*.12+bob);ctx.fill();
+    ctx.beginPath();ctx.moveTo(s.x+dir*z*.24,s.y-z*.12+bob);ctx.lineTo(s.x+dir*z*.36,s.y-z*.34+bob);ctx.lineTo(s.x+dir*z*.46,s.y-z*.10+bob);ctx.fill();
+    ctx.strokeStyle='#505659';ctx.lineWidth=Math.max(1,z*.08);for(const lx of[-.24,0,.22]){ctx.beginPath();ctx.moveTo(s.x+lx*z,s.y+z*.10+bob);ctx.lineTo(s.x+lx*z,s.y+z*.54+bob);ctx.stroke()}
+    ctx.strokeStyle='#4b5156';ctx.beginPath();ctx.moveTo(s.x-dir*z*.46,s.y-z*.02+bob);ctx.lineTo(s.x-dir*z*.68,s.y-z*.18+bob);ctx.stroke();
+    return;
+  }
+  ctx.fillStyle='#93633d';ctx.beginPath();ctx.ellipse(s.x,s.y+bob,z*.50,z*.26,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#865632';ctx.beginPath();ctx.ellipse(s.x+dir*z*.42,s.y-z*.10+bob,z*.18,z*.14,0,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle='#7e512f';ctx.lineWidth=Math.max(1,z*.07);ctx.beginPath();ctx.moveTo(s.x+dir*z*.28,s.y-z*.08+bob);ctx.lineTo(s.x+dir*z*.12,s.y-z*.28+bob);ctx.stroke();
+  ctx.strokeStyle='#6c4630';ctx.lineWidth=Math.max(1,z*.08);for(const lx of[-.20,.06,.26]){ctx.beginPath();ctx.moveTo(s.x+lx*z,s.y+z*.08+bob);ctx.lineTo(s.x+lx*z,s.y+z*.56+bob);ctx.stroke()}
+  ctx.fillStyle='#6f482f';ctx.beginPath();ctx.moveTo(s.x+dir*z*.42,s.y-z*.20+bob);ctx.lineTo(s.x+dir*z*.56,s.y-z*.40+bob);ctx.lineTo(s.x+dir*z*.52,s.y-z*.14+bob);ctx.fill();
+  ctx.beginPath();ctx.moveTo(s.x+dir*z*.30,s.y-z*.18+bob);ctx.lineTo(s.x+dir*z*.44,s.y-z*.38+bob);ctx.lineTo(s.x+dir*z*.40,s.y-z*.12+bob);ctx.fill();
+  if(base>6){ctx.strokeStyle='#60402b';ctx.beginPath();ctx.moveTo(s.x-dir*z*.44,s.y-z*.02+bob);ctx.lineTo(s.x-dir*z*.62,s.y-z*.16+bob);ctx.stroke()}
 }
 function drawHazards(){
   const b=visibleBounds(2),z=cameraScale();
@@ -1459,7 +1492,7 @@ function render(){
   if(dirty)rebuildTerrain();clampCamera();ctx.fillStyle="#1c4f6f";ctx.fillRect(0,0,canvas.width,canvas.height);
   const s=cameraScale(),v=viewportWorldSize(),viewLeft=camX-v.w/2,viewTop=camY-v.h/2,wl=Math.max(0,viewLeft),wt=Math.max(0,viewTop),wr=Math.min(WORLD_W,viewLeft+v.w),wb=Math.min(WORLD_H,viewTop+v.h);
   if(wr>wl&&wb>wt){ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";ctx.drawImage(terrainCanvas,wl*TEX,wt*TEX,(wr-wl)*TEX,(wb-wt)*TEX,(wl-viewLeft)*s,(wt-viewTop)*s,(wr-wl)*s,(wb-wt)*s)}
-  drawSurfaceAtmosphere();drawWater();if(settings.trails)drawTrails();drawGroundDetails();drawHazards();drawTerrainFeatures();buildings.slice().sort((a,b)=>a.y-b.y).forEach(drawBuilding);critters.slice().sort((a,b)=>a.py-b.py).forEach(drawCritter);people.filter(p=>p.layer!=="underground").sort((a,b)=>a.py-b.py).forEach(drawPerson);if(settings.effects)drawParticles();drawClouds();drawLighting();drawVignette();drawMiniMap()
+  drawCoastalBlend();drawSurfaceAtmosphere();drawWater();if(settings.trails)drawTrails();drawGroundDetails();drawHazards();drawTerrainFeatures();buildings.slice().sort((a,b)=>a.y-b.y).forEach(drawBuilding);critters.slice().sort((a,b)=>a.py-b.py).forEach(drawCritter);people.filter(p=>p.layer!=="underground").sort((a,b)=>a.py-b.py).forEach(drawPerson);if(settings.effects)drawParticles();drawClouds();drawLighting();drawVignette();drawMiniMap()
 }
 function eraName(){const pop=people.filter(p=>p.alive).length;if(pop>=18)return"Village";if(pop>=10)return"Hamlet";if(pop>=5)return"Growing Camp";if(buildingsOf("hut").length)return"Early Settlement";return"Primitive"}
 function jobCounts(){const c={};for(const p of people.filter(p=>p.alive)){c[p.job]=(c[p.job]||0)+1}return c}
@@ -1630,8 +1663,8 @@ function settingsHtml(){
   <div class="menuSection">World management</div><button class="bigAction" data-action="center-world" type="button">⌾ Center on First Hearth</button><button class="bigAction" data-action="open-world-creator" type="button">🌍 Open World Creator</button><button class="bigAction danger" data-action="open-world-reset" type="button">↺ Reset Current World</button>`
 }
 function updatesHtml(){
-  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V6.5 · Grand Graphics Overhaul</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
-  <div class="updateItem"><b>V6.5 — Grand Graphics Overhaul</b><small>Current</small><p>The world surface has been visually rebuilt with sharper land texturing, richer biome color, animated wave motion, improved shoreline foam, bush-like food clusters, cleaner low-zoom forest rendering and stronger visual grounding between the land and the citizens.</p></div><div class="updateItem"><b>V6 — Living Civilization</b><small>Previous</small><p>Citizens age, learn, build skills, form households, create families, experience grief and leave a lineage behind.</p></div><div class="updateItem"><b>V5.4 — World Scale</b><small>Previous</small><p>Dynamic 100×100 through 500×500 world sizes.</p></div><div class="updateItem"><b>V5.3 — Family & Marriage</b><small>Previous</small><p>Dating, emotional bonds, marriage, shared surnames, breakups and child surname inheritance.</p></div><div class="updateItem"><b>V5.2 — Responsive World</b><small>Previous</small><p>Responsive landscape catalogs, smaller wording and procedural unique names.</p></div><div class="updateItem"><b>V5.1 — Living World</b><small>Previous</small><p>Compact HUD, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs and relationships.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
+  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V6.6 · Organic Terrain + Sprite Overhaul</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
+  <div class="updateItem"><b>V6.6 — Organic Terrain + Sprite Overhaul</b><small>Current</small><p>Coastlines are now visually softer, the shoreline breathes with a light tide effect, wave motion is more visible, and both citizens and animals use upgraded tiny vector sprites for a higher-quality world feel.</p></div><div class="updateItem"><b>V6.5 — Grand Graphics Overhaul</b><small>Previous</small><p>The world surface was rebuilt with sharper texturing, richer biome color, animated wave motion, improved shoreline foam, bush-like food clusters, cleaner low-zoom forest rendering and stronger visual grounding between the land and the citizens.</p></div><div class="updateItem"><b>V6 — Living Civilization</b><small>Previous</small><p>Citizens age, learn, build skills, form households, create families, experience grief and leave a lineage behind.</p></div><div class="updateItem"><b>V5.4 — World Scale</b><small>Previous</small><p>Dynamic 100×100 through 500×500 world sizes.</p></div><div class="updateItem"><b>V5.3 — Family & Marriage</b><small>Previous</small><p>Dating, emotional bonds, marriage, shared surnames, breakups and child surname inheritance.</p></div><div class="updateItem"><b>V5.2 — Responsive World</b><small>Previous</small><p>Responsive landscape catalogs, smaller wording and procedural unique names.</p></div><div class="updateItem"><b>V5.1 — Living World</b><small>Previous</small><p>Compact HUD, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs and relationships.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
   <div class="updateItem"><b>V4.1 — Underground</b><small>Previous</small><p>Surface/Underground toggle, caves, deep stone, underground lakes, magma, iron/gold/coal/crystal veins, mine entrances, tunneling miners and layer-aware god powers.</p></div>
   <div class="updateItem"><b>V4 — World Control</b><small>Previous</small><p>World, God Powers and Resources tabs; full people/village/history/settings panels; biome painting; fire and lava; iron and gold; wildlife; direct people spawning; persistent visual settings.</p></div>
   <div class="updateItem"><b>V3 — Civilization</b><small>Previous</small><p>Families, jobs, farms, stockpiles, building construction, discoveries and village growth.</p></div>

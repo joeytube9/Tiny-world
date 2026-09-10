@@ -1,7 +1,7 @@
 {
   "name": "Tiny World",
   "short_name": "Tiny World",
-  "description": "Tiny World V6.5 adds a major visual upgrade: sharper terrain, richer biomes, animated waves, better shoreline foam, improved bushes and lower-zoom forest rendering.",
+  "description": "Tiny World V6.6 adds softer organic coastlines, more animated shoreline waves, and upgraded tiny sprites for villagers and animals.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
