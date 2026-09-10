@@ -1,7 +1,7 @@
 {
   "name": "Tiny World",
   "short_name": "Tiny World",
-  "description": "Tiny World V8 uses a continuous painterly terrain renderer, smooth coastlines, animated traveling waves, organic forests, and upgraded miniature people and animals.",
+  "description": "Tiny World V8.1 adds a truly animated living ocean with real-time traveling swells, drifting ripples, tidal shore foam and cleaner shallow water.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
