@@ -1,16 +1,16 @@
-Tiny World V7.1 — BRUSHED WORLD PASS
+Tiny World V7.2 — PAINTED WORLD PASS
 
-This pass pushes the art direction further toward a premium painted look.
+This update targets the exact request for a smoother brush-painted world while keeping editable custom world creation underneath.
 
 WHAT CHANGED
-- Stronger painterly terrain overlay to hide hard tile edges.
-- Bigger brushed land dabs so terrain reads less block-by-block.
-- More organic forest canopies.
-- Improved individual tree art.
-- More animated shoreline surf.
-- Stronger wave motion across water.
-- Slight terrain texture density increase.
+- Stronger painted terrain rendering with larger overlapping brush dabs.
+- Softer coast blending to hide tile edges more aggressively.
+- More active shoreline surf and stronger wave motion.
+- More organic low-zoom forest shapes.
+- Improved individual tree canopies.
+- Slightly denser terrain texture resolution.
 
 NOTES
-- The simulation is still tile based underneath, but V7.1 hides the grid more aggressively.
-- If your browser still shows the older build after deploy, clear cached site data once.
+- World creation still works exactly the same under the hood.
+- The simulation remains tile-based, but the renderer now does more to hide square placement.
+- If you still see an older build after deploy, clear site data once because the service worker may cache prior assets.

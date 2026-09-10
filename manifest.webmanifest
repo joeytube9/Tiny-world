@@ -1,7 +1,7 @@
 {
   "name": "Tiny World",
   "short_name": "Tiny World",
-  "description": "Tiny World V7.1 adds a stronger brushed terrain pass, more organic forests, and more dynamic animated water.",
+  "description": "Tiny World V7.2 delivers a painted-world renderer with smoother brushed terrain, more organic forests, and more dynamic surf and wave motion.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
