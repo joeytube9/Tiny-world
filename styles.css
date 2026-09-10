@@ -790,3 +790,43 @@ button.active{
 .sizeNotice{padding:6px 8px;border-radius:9px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.055);color:#91a6ac;font-size:7.5px;line-height:1.35}
 @media(max-width:380px){.worldSizeGrid{grid-template-columns:repeat(3,1fr)}}
 @media(orientation:landscape) and (max-height:560px){.worldSizeChoice{min-height:39px}.worldSizeChoice b{font-size:8px}.sizeNotice{font-size:6.5px;padding:4px 6px}}
+
+
+/* V6 — Living Civilization data UI */
+.skillBox{
+  margin-top:7px;padding:8px;border-radius:11px;
+  background:rgba(255,255,255,.035);
+  border:1px solid rgba(255,255,255,.06)
+}
+.skillBox>b{display:block;font-size:9px;margin-bottom:5px;color:#dfe8e8}
+.skillLine{
+  display:flex;justify-content:space-between;gap:8px;
+  padding:3px 0;border-bottom:1px solid rgba(255,255,255,.035);
+  font-size:8px;color:#9fb1b7
+}
+.skillLine:last-child{border-bottom:0}
+.skillLine b{font-size:8px;color:#d6c797}
+.familyCard{
+  padding:8px;margin-bottom:6px;border-radius:12px;
+  background:linear-gradient(180deg,rgba(255,255,255,.048),rgba(255,255,255,.024));
+  border:1px solid rgba(255,255,255,.07)
+}
+.familyCardHead{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  margin-bottom:6px
+}
+.familyCardHead b{font-size:10px}
+.familyCardHead small{display:block;font-size:7px;color:#91a5ab;margin-top:1px}
+.familyCardHead span{font-size:17px}
+.familyMembers{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
+.familyMembers button{
+  min-height:31px;padding:4px 6px;border-radius:8px;
+  text-align:left;font-size:8px;white-space:normal
+}
+.familyMembers button small{
+  display:block;font-size:6.5px;color:#8ea2a8;margin-top:1px
+}
+@media(orientation:landscape) and (max-height:560px){
+  .familyMembers{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .skillBox{padding:6px}
+}

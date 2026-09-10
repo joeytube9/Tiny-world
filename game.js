@@ -415,10 +415,218 @@ function splitCouple(a,b,why="grew apart"){
   addEvent(`${a.name} and ${b.name} ${wasMarried?"ended their marriage":"split up"} because they ${why}.`,"relationship")
 }
 
+const skillJobs=["Gatherer","Woodcutter","Builder","Farmer","Miner","Hauler"];
+
+function lifeStageFor(age){
+  return age<6?"Young Child":age<14?"Child":age<18?"Teen":age<55?"Adult":age<70?"Older Adult":"Elder"
+}
+function skillLevel(p,job=p.job){
+  return Math.round((p.skills&&p.skills[job])||0)
+}
+function skillTitle(v){
+  return v>=85?"Master":v>=65?"Expert":v>=42?"Skilled":v>=20?"Practiced":"Novice"
+}
+function gainSkill(p,job,amount=.12){
+  if(!p||!skillJobs.includes(job))return;
+  p.skills=p.skills||{};
+  const before=p.skills[job]||0;
+  p.skills[job]=clamp(before+amount,0,100);
+  if(before<20&&p.skills[job]>=20)memoryAdd(p,`Became practiced at ${job.toLowerCase()} work`);
+  if(before<42&&p.skills[job]>=42)memoryAdd(p,`Became skilled at ${job.toLowerCase()} work`);
+  if(before<65&&p.skills[job]>=65){memoryAdd(p,`Became an expert ${job.toLowerCase()}`);addEvent(`${p.name} became an expert ${job.toLowerCase()}.`,"citizen")}
+  if(before<85&&p.skills[job]>=85){memoryAdd(p,`Mastered ${job.toLowerCase()} work`);addEvent(`${p.name} became a master ${job.toLowerCase()}.`,"citizen")}
+}
+function workEfficiency(p,job=p.job){
+  return 1+skillLevel(p,job)/100*.72+(p.traits?.work||.5)*.14
+}
+function rewardWork(p,amount=.08){
+  p.wealth=clamp((p.wealth||0)+amount,0,999);
+  p.reputation=clamp((p.reputation||0)+amount*.22,0,100);
+  if(skillLevel(p)>32&&Math.random()<.0025&&p.possessions.tools<3){
+    p.possessions.tools++;
+    memoryAdd(p,"Acquired a better work tool")
+  }
+}
+function bestRelationFor(p,positive=true){
+  let best=null,bestValue=positive?-999:999;
+  for(const [id,v0] of Object.entries(p.relations||{})){
+    const q=people.find(x=>x.id===Number(id)&&x.alive);
+    if(!q)continue;
+    const v=Number(v0)||0;
+    if((positive&&v>bestValue)||(!positive&&v<bestValue)){best=q;bestValue=v}
+  }
+  return best?{person:best,value:Math.round(bestValue)}:null
+}
+function householdMembers(p){
+  if(!p.homeId)return [];
+  return people.filter(q=>q.alive&&q.homeId===p.homeId)
+}
+function homeFor(p){return p.homeId?buildings.find(b=>b.id===p.homeId&&b.complete):null}
+function assignHomes(){
+  const huts=buildingsOf("hut");
+  if(!huts.length){for(const p of people)p.homeId=null;return}
+  const capacity=new Map(huts.map(h=>[h.id,4]));
+  for(const p of people)if(p.homeId&&!capacity.has(p.homeId))p.homeId=null;
+
+  // Keep valid existing households first.
+  for(const p of people.filter(x=>x.alive&&x.homeId)){
+    if((capacity.get(p.homeId)||0)>0)capacity.set(p.homeId,capacity.get(p.homeId)-1);
+    else p.homeId=null
+  }
+
+  // Married/dating parents and children try to share a home.
+  const grouped=new Set();
+  for(const p of people.filter(x=>x.alive)){
+    if(grouped.has(p.id)||p.homeId)continue;
+    const partner=p.partner?people.find(q=>q.id===p.partner&&q.alive):null;
+    const kids=people.filter(q=>q.alive&&(q.parents||[]).includes(p.id)&&(partner?(q.parents||[]).includes(partner.id):true)&&q.age<18);
+    const family=[p,...(partner&&partner.id!==p.id?[partner]:[]),...kids].filter((q,i,a)=>a.findIndex(x=>x.id===q.id)===i&&!q.homeId);
+    let chosen=huts.find(h=>(capacity.get(h.id)||0)>=Math.min(4,family.length));
+    if(!chosen)chosen=huts.sort((a,b)=>(capacity.get(b.id)||0)-(capacity.get(a.id)||0))[0];
+    if(chosen){
+      for(const q of family){
+        if((capacity.get(chosen.id)||0)<=0)break;
+        q.homeId=chosen.id;capacity.set(chosen.id,capacity.get(chosen.id)-1);grouped.add(q.id)
+      }
+    }
+  }
+
+  // Everyone else takes any free bed.
+  for(const p of people.filter(x=>x.alive&&!x.homeId)){
+    const h=huts.find(q=>(capacity.get(q.id)||0)>0);
+    if(h){p.homeId=h.id;capacity.set(h.id,capacity.get(h.id)-1)}
+  }
+}
+function jobAffinity(p,job){
+  const t=p.traits||{},skill=skillLevel(p,job)/100;
+  const trait={
+    Gatherer:(t.curiosity||.5)*.42+(t.bravery||.5)*.18+(t.work||.5)*.22,
+    Woodcutter:(t.work||.5)*.50+(t.bravery||.5)*.22,
+    Builder:(t.work||.5)*.56+(t.kindness||.5)*.14,
+    Farmer:(t.work||.5)*.38+(t.kindness||.5)*.31,
+    Miner:(t.bravery||.5)*.43+(t.work||.5)*.43,
+    Hauler:(t.work||.5)*.31+(t.social||.5)*.26+(t.kindness||.5)*.20
+  }[job]||.5;
+  return trait+skill*.55+(p.preferredJob===job?.18:0)+(p.job===job?.14:0)
+}
+function setCareer(p,job,reason="Village need"){
+  if(!p||p.job===job)return;
+  const old=p.job;
+  p.job=job;p.jobSince=day;p.careerChanges=(p.careerChanges||0)+1;
+  p.preferredJob=p.preferredJob||job;
+  memoryAdd(p,`Changed work from ${old} to ${job}`);
+  p.decisionReason=reason
+}
+function choosePersonalGoal(p){
+  if(p.age<6)return "Stay close to family";
+  if(p.age<14)return p.education<55?"Learn from adults":"Explore childhood interests";
+  if(p.age<18)return `Prepare for ${p.preferredJob||"adult work"}`;
+  if((p.grief||0)>45)return "Recover from loss";
+  if(!p.partner&&(p.traits?.social||0)>.65)return "Build a close relationship";
+  if(p.partner&&p.children.length===0&&(p.traits?.kindness||0)>.65)return "Build a family";
+  if((p.wealth||0)<10&&(p.traits?.work||0)>.62)return "Build personal security";
+  if((p.traits?.curiosity||0)>.74)return "Explore and understand the world";
+  if(skillLevel(p,p.job)<65&&(p.traits?.work||0)>.58)return `Master ${p.job.toLowerCase()} work`;
+  return "Help First Hearth prosper"
+}
+function updateLifeStage(p){
+  const stage=lifeStageFor(p.age);
+  if(p.lifeStage!==stage){
+    const old=p.lifeStage;p.lifeStage=stage;
+    if(old){
+      memoryAdd(p,`Entered the ${stage.toLowerCase()} stage of life`);
+      if(stage==="Teen"){addEvent(`${p.name} entered adolescence.`,"life");p.education=Math.max(p.education,25)}
+      if(stage==="Adult"){
+        p.preferredJob=p.preferredJob||skillJobs.slice().sort((a,b)=>jobAffinity(p,b)-jobAffinity(p,a))[0];
+        memoryAdd(p,`Became an adult with an interest in ${p.preferredJob}`);
+        addEvent(`${p.name} became an adult.`,"life")
+      }
+      if(stage==="Elder"){memoryAdd(p,"Became an elder of First Hearth");addEvent(`${p.name} became an elder.`,"life")}
+    }
+  }
+}
+function teachChild(p){
+  if(!p.alive||p.age<5||p.age>=18||p.layer==="underground")return false;
+  let mentor=null,best=-1;
+  const parentIds=p.parents||[];
+  for(const q of people){
+    if(!q.alive||q.age<18||q.layer==="underground")continue;
+    const d=Math.hypot(q.x-p.x,q.y-p.y);
+    if(d>8)continue;
+    const bonus=parentIds.includes(q.id)?18:0;
+    const mastery=Math.max(...skillJobs.map(j=>skillLevel(q,j)));
+    const score=mastery+bonus-d*2;
+    if(score>best){best=score;mentor=q}
+  }
+  if(!mentor)return false;
+  p.mentorId=mentor.id;
+  p.education=clamp(p.education+.018*(1+(mentor.traits?.kindness||.5)),0,100);
+  if(p.age>=10&&Math.random()<.018){
+    const job=skillJobs.slice().sort((a,b)=>skillLevel(mentor,b)-skillLevel(mentor,a))[0];
+    p.skills[job]=clamp((p.skills[job]||0)+.08,0,100);
+    p.preferredJob=p.preferredJob||job
+  }
+  return true
+}
+function updateEmotionalLife(p){
+  const home=homeFor(p),partner=p.partner?people.find(q=>q.id===p.partner&&q.alive):null;
+  const best=bestRelationFor(p,true),rival=bestRelationFor(p,false);
+  p.bestFriendId=best&&best.value>=25?best.person.id:null;
+  p.rivalId=rival&&rival.value<=-18?rival.person.id:null;
+  p.grief=clamp((p.grief||0)-.004,0,100);
+  let happiness=68-(p.stress||0)*.42-p.hunger*.12-p.thirst*.13+(p.energy-50)*.10-(p.grief||0)*.25;
+  if(home)happiness+=6;
+  if(partner)happiness+=clamp(relationshipBond(p,partner),-60,80)*.07;
+  if(best&&best.value>30)happiness+=4;
+  if(p.rivalId)happiness-=3;
+  if(p.wealth>18)happiness+=2;
+  p.happiness=clamp(happiness,0,100);
+  if(p.happiness>78)p.mood="Content";
+  else if(p.happiness<25)p.mood="Miserable";
+  else if(p.grief>45)p.mood="Grieving";
+  p.longGoal=choosePersonalGoal(p)
+}
+function handleDeath(p,cause="natural causes"){
+  if(!p||!p.alive)return;
+  p.alive=false;p.causeOfDeath=cause;p.deathDay=Math.floor(day);
+  settlement.deaths++;
+  const age=Math.floor(p.age);
+  const partner=p.partner?people.find(q=>q.id===p.partner&&q.alive):null;
+  if(partner){
+    partner.partner=null;partner.relationshipStage="widowed";
+    partner.grief=clamp((partner.grief||0)+55,0,100);partner.stress=clamp((partner.stress||0)+28,0,100);
+    memoryAdd(partner,`Lost ${p.name}`);
+    p.partner=null
+  }
+  for(const q of people){
+    if(!q.alive||q.id===p.id)continue;
+    const closeFamily=(q.parents||[]).includes(p.id)||(p.parents||[]).includes(q.id);
+    const rel=relationValue(q,p.id);
+    if(closeFamily||rel>35){
+      q.grief=clamp((q.grief||0)+(closeFamily?42:20),0,100);
+      q.stress=clamp((q.stress||0)+(closeFamily?18:8),0,100);
+      memoryAdd(q,`${p.name} died`)
+    }
+  }
+  addEvent(`${p.name} died at age ${age} from ${cause}.`,"death")
+}
+function updateAging(p){
+  updateLifeStage(p);
+  if(p.age>p.lifespan){
+    const excess=p.age-p.lifespan;
+    if(Math.random()<.000005*(1+excess*.42)){handleDeath(p,"old age");return false}
+  }
+  return p.alive
+}
+function livingCivUpdate(){
+  assignHomes();
+  for(const p of people.filter(q=>q.alive))updateEmotionalLife(p)
+}
+
 function makePerson(name,x,y,sex,age,parents=[]){
   const finalName=(!name||usedNames.has(name)||usedFirstNames.has(String(name).split(" ")[0]))?generateUniqueName(name?String(name).split(" ")[0]:null):name;
   registerPersonName(finalName);
-  return{
+  const p={
     id:nextPersonId++,name:finalName,x,y,px:x,py:y,sex,age,parents:[...parents],
     health:100,hunger:rnd(6,16),thirst:rnd(6,14),energy:rnd(80,100),
     job:age<14?"Child":"Gatherer",goal:"Explore",mood:"Curious",
@@ -431,8 +639,17 @@ function makePerson(name,x,y,sex,age,parents=[]){
     relationshipStage:"single",relationshipSince:0,marriageDay:null,
     familySurname:null,birthSurname:String(finalName).split(" ").slice(-1)[0],
     birthName:finalName,nameHistory:[],surnameAttachment:rnd(.25,.95),
-    breakups:0,lastBreakupDay:-999
-  }
+    breakups:0,lastBreakupDay:-999,
+    lifeStage:lifeStageFor(age),lifespan:rnd(68,91),deathDay:null,causeOfDeath:null,
+    happiness:rnd(55,75),grief:0,education:age>=18?rnd(24,58):age>=8?rnd(4,20):0,
+    mentorId:null,homeId:null,wealth:rnd(0,3),reputation:0,
+    possessions:{tools:0,keepsakes:parents.length?1:0},
+    skills:{Gatherer:rnd(0,age>=18?15:3),Woodcutter:rnd(0,age>=18?8:2),Builder:rnd(0,age>=18?8:2),Farmer:rnd(0,age>=18?7:2),Miner:rnd(0,age>=18?5:1),Hauler:rnd(0,age>=18?8:2)},
+    preferredJob:null,jobSince:day,careerChanges:0,bestFriendId:null,rivalId:null
+  };
+  p.preferredJob=age>=14?skillJobs.slice().sort((a,b)=>jobAffinity(p,b)-jobAffinity(p,a))[0]:null;
+  p.longGoal=choosePersonalGoal(p);
+  return p
 }
 function makeCritter(type,x,y){
   const c={id:nextCritterId++,type,x,y,px:x,py:y,dir:1,phase:rnd(0,6.28),alive:true};
@@ -512,8 +729,9 @@ function aiDangerNear(p){
 function aiUpdateMind(p){
   if(!p.alive)return;
   p.socialNeed=clamp((p.socialNeed||0)+.006,0,100);
-  p.stress=clamp((p.stress||0)+(p.hunger>70?.012:0)+(p.thirst>70?.014:0)+(p.health<55?.018:0)-.003,0,100);
-  if(!p.longGoal||tick-p.lastDecision>900){p.longGoal=aiChooseLongGoal(p)}
+  p.stress=clamp((p.stress||0)+(p.hunger>70?.012:0)+(p.thirst>70?.014:0)+(p.health<55?.018:0)+(p.grief||0)*.0007-.003,0,100);
+  if(tick%190===0)updateEmotionalLife(p);
+  if(!p.longGoal||tick-p.lastDecision>900){p.longGoal=choosePersonalGoal(p)}
   const danger=aiDangerNear(p);
   if(danger>0){p.mood="Alarmed";p.decisionReason="Avoiding nearby danger";p.stress=clamp(p.stress+.18,0,100)}
   else if(p.hunger>70){p.decisionReason="Food is becoming urgent"}
@@ -533,11 +751,19 @@ function aiSocialize(p){
   p.goal=`Talk with ${friend.name}`;
   if(bd>1.6){moveToward(p,friend);return true}
   p.socialNeed=clamp(p.socialNeed-32,0,100);friend.socialNeed=clamp((friend.socialNeed||0)-18,0,100);
-  const socialGain=p.partner===friend.id?(p.relationshipStage==="married"?1.7:1.4):1;
-  p.relations[friend.id]=clamp(Number(p.relations[friend.id]||0)+socialGain,-100,100);
-  friend.relations=friend.relations||{};friend.relations[p.id]=clamp(Number(friend.relations[p.id]||0)+socialGain,-100,100);
-  p.mood="Connected";
-  if(Math.random()<.02){p.memory.unshift(`Shared time with ${friend.name}`);p.memory=p.memory.slice(0,8)}
+  const partnerGain=p.partner===friend.id?(p.relationshipStage==="married"?1.7:1.4):1;
+  const conflictChance=((p.stress||0)+(friend.stress||0))/240*(1-((p.traits?.kindness||.5)+(friend.traits?.kindness||.5))/2)*.16;
+  if(Math.random()<conflictChance){
+    p.relations[friend.id]=clamp(Number(p.relations[friend.id]||0)-rnd(2,5),-100,100);
+    friend.relations=friend.relations||{};friend.relations[p.id]=clamp(Number(friend.relations[p.id]||0)-rnd(2,5),-100,100);
+    p.mood="Irritated";friend.mood="Irritated";
+    memoryAdd(p,`Argued with ${friend.name}`);memoryAdd(friend,`Argued with ${p.name}`)
+  }else{
+    p.relations[friend.id]=clamp(Number(p.relations[friend.id]||0)+partnerGain,-100,100);
+    friend.relations=friend.relations||{};friend.relations[p.id]=clamp(Number(friend.relations[p.id]||0)+partnerGain,-100,100);
+    p.mood="Connected";
+    if(Math.random()<.025)memoryAdd(p,`Shared time with ${friend.name}`)
+  }
   return true
 }
 function aiFlee(p){
@@ -549,7 +775,41 @@ function aiFlee(p){
   return true
 }
 
-function assignJobs(){const adults=people.filter(p=>p.alive&&p.age>=14&&p.layer!=="underground").sort((a,b)=>(b.traits?.work||.5)-(a.traits?.work||.5));const pending=buildings.filter(b=>!b.complete);const farms=buildingsOf("farm");let farmerSlots=hasTech("Agriculture")?Math.max(0,Math.min(farms.length*2,Math.ceil(adults.length*.28))):0;let builders=pending.length?Math.max(1,Math.ceil(adults.length*.15)):0;let miners=hasTech("Stoneworking")&&(settlement.stone<14||(settlement.iron||0)<8||(settlement.gold||0)<3)?Math.max(1,Math.ceil(adults.length*.16)):0;let woodNeeded=settlement.wood<18?Math.max(1,Math.ceil(adults.length*.25)):Math.max(0,Math.ceil(adults.length*.12));let foodNeeded=settlement.food<20?Math.max(1,Math.ceil(adults.length*.30)):Math.max(1,Math.ceil(adults.length*.16));for(const p of adults){if(builders>0){p.job="Builder";builders--;continue}if(farmerSlots>0){p.job="Farmer";farmerSlots--;continue}if(miners>0){p.job="Miner";miners--;continue}if(woodNeeded>0){p.job="Woodcutter";woodNeeded--;continue}if(foodNeeded>0){p.job="Gatherer";foodNeeded--;continue}const t=p.traits||{};p.job=(t.social||0)>.72?"Hauler":(t.curiosity||0)>.68?"Gatherer":(t.work||0)>.72?"Woodcutter":Math.random()<.45?"Hauler":"Gatherer"}}
+function assignJobs(){
+  const adults=people.filter(p=>p.alive&&p.age>=14&&p.layer!=="underground");
+  if(!adults.length)return;
+  const pending=buildings.filter(b=>!b.complete),farms=buildingsOf("farm");
+  const desired={
+    Builder:pending.length?Math.max(1,Math.ceil(adults.length*.14)):0,
+    Farmer:hasTech("Agriculture")?Math.max(0,Math.min(farms.length*2,Math.ceil(adults.length*.25))):0,
+    Miner:hasTech("Stoneworking")&&(settlement.stone<14||(settlement.iron||0)<8||(settlement.gold||0)<3)?Math.max(1,Math.ceil(adults.length*.14)):0,
+    Woodcutter:settlement.wood<18?Math.max(1,Math.ceil(adults.length*.21)):Math.max(0,Math.ceil(adults.length*.10)),
+    Gatherer:settlement.food<20?Math.max(1,Math.ceil(adults.length*.26)):Math.max(1,Math.ceil(adults.length*.14)),
+    Hauler:Math.max(0,Math.ceil(adults.length*.10))
+  };
+  let slots=[];
+  for(const [job,n] of Object.entries(desired))for(let i=0;i<n;i++)slots.push(job);
+  while(slots.length<adults.length)slots.push(Math.random()<.55?"Gatherer":"Hauler");
+
+  const unassigned=[...adults];
+  while(slots.length&&unassigned.length){
+    let bestP=null,bestJob=null,bestScore=-999,bestPi=-1,bestSi=-1;
+    for(let pi=0;pi<unassigned.length;pi++){
+      const p=unassigned[pi];
+      for(let si=0;si<slots.length;si++){
+        const job=slots[si];
+        let score=jobAffinity(p,job);
+        if(day-(p.jobSince||0)<6&&p.job===job)score+=.18;
+        if(p.lifeStage==="Elder"&&(job==="Miner"||job==="Woodcutter"))score-=.25;
+        if(p.lifeStage==="Teen"&&(job==="Miner"||job==="Builder"))score-=.10;
+        if(score>bestScore){bestScore=score;bestP=p;bestJob=job;bestPi=pi;bestSi=si}
+      }
+    }
+    if(!bestP)break;
+    if(bestP.job!==bestJob)setCareer(bestP,bestJob,`Best fit for ${bestJob.toLowerCase()} work`);
+    unassigned.splice(bestPi,1);slots.splice(bestSi,1)
+  }
+}
 function deliver(p){if(p.layer==="underground")return false;const d=dropoff(p);if(!d)return false;if(!atTarget(p,d,1.8)){p.goal=`Deliver ${p.carryType}`;moveToward(p,d);return true}if(p.carryType==="food")settlement.food+=p.carryAmount;if(p.carryType==="wood")settlement.wood+=p.carryAmount;if(p.carryType==="stone")settlement.stone+=p.carryAmount;if(p.carryType==="iron")settlement.iron+=p.carryAmount;if(p.carryType==="gold")settlement.gold+=p.carryAmount;if(p.carryType==="coal")settlement.coal=(settlement.coal||0)+p.carryAmount;p.carryType=null;p.carryAmount=0;p.goal="Work";return true}
 function findFarmWork(p){const farms=buildingsOf("farm");if(!farms.length)return null;let best=null,bd=1e9;for(const f of farms){const d=Math.abs(p.x-f.x)+Math.abs(p.y-f.y);if(d<bd&&(f.crop>=100||f.crop<15)){bd=d;best=f}}return best||farms[rndi(0,farms.length-1)]}
 function workMinerUnderground(p){
@@ -576,15 +836,15 @@ function workMinerUnderground(p){
   else if(uIron[i]>0){uIron[i]--;p.carryType="iron"}
   else if(uCoal[i]>0){uCoal[i]--;p.carryType="coal"}
   else{uStone[i]=Math.max(0,uStone[i]-1);p.carryType="stone"}
-  p.carryAmount=1;underground[i]=U.CAVE;undergroundDirty=true;spawnParticles("stone",p.x,p.y,5);return true
+  p.carryAmount=1+(Math.random()<skillLevel(p,"Miner")/170?1:0);gainSkill(p,"Miner",.15);rewardWork(p,.07);underground[i]=U.CAVE;undergroundDirty=true;spawnParticles("stone",p.x,p.y,5);return true
 }
 function workPerson(p){if(p.job==="Miner"&&buildingsOf("mine").length)return workMinerUnderground(p);if(p.carryAmount>0&&p.carryType)return deliver(p);
-  if(p.job==="Builder"){const site=buildings.find(b=>!b.complete);if(site){p.goal=`Build ${site.type}`;if(!atTarget(p,site,1.6)){moveToward(p,site);return true}site.progress+=1.8;spawnParticles("dust",site.x,site.y,2);if(site.progress>=100){site.progress=100;site.complete=true;addEvent(`${p.name} completed the ${site.type}.`,"building");if(site.type==="hut")discover("Shelter","The settlement mastered permanent shelter.");if(site.type==="stockpile")discover("Storage","A communal stockpile established shared storage.");if(site.type==="farm")discover("Agriculture","The first fields were prepared for agriculture.");if(site.type==="granary")discover("Granaries","A granary was completed to protect the harvest.");if(site.type==="mine"){discover("Mining","First Hearth opened its first mine shaft.");openMineShaft(site)}}return true}}
-  if(p.job==="Farmer"){const f=findFarmWork(p);if(f){p.goal="Tend fields";if(!atTarget(p,f,2)){moveToward(p,f);return true}if(f.crop>=100){p.carryType="food";p.carryAmount=5;f.crop=8;spawnParticles("grain",f.x,f.y,8);return true}if(f.crop<15)f.crop=18;return true}}
-  if(p.job==="Miner"){const target=nearestTile(p,(i)=>rocks[i]>0||iron[i]>0||gold[i]>0,34);if(target){p.goal="Mine minerals";if(!atTarget(p,target,1)){moveToward(p,target);return true}const i=idx(target.x,target.y);if(gold[i]>0){gold[i]--;p.carryType="gold"}else if(iron[i]>0){iron[i]--;p.carryType="iron"}else{rocks[i]--;p.carryType="stone"}p.carryAmount=1;spawnParticles("stone",p.x,p.y,5);return true}}
-  if(p.job==="Woodcutter"){const target=nearestTile(p,(i)=>trees[i]>0,34);if(target){p.goal="Cut wood";if(!atTarget(p,target,1)){moveToward(p,target);return true}const i=idx(target.x,target.y);trees[i]--;p.carryType="wood";p.carryAmount=1;spawnParticles("leaf",p.x,p.y,6);return true}}
-  if(p.job==="Hauler"){const f=buildingsOf("farm").find(f=>f.crop>=100);if(f){p.goal="Collect harvest";if(!atTarget(p,f,2)){moveToward(p,f);return true}p.carryType="food";p.carryAmount=4;f.crop=12;return true}}
-  const target=nearestTile(p,(i)=>food[i]>0,34);if(target){p.goal="Gather food";if(!atTarget(p,target,1)){moveToward(p,target);return true}const i=idx(target.x,target.y);food[i]--;p.carryType="food";p.carryAmount=2;return true}
+  if(p.job==="Builder"){const site=buildings.find(b=>!b.complete);if(site){p.goal=`Build ${site.type}`;if(!atTarget(p,site,1.6)){moveToward(p,site);return true}site.progress+=1.35*workEfficiency(p,"Builder");gainSkill(p,"Builder",.10);rewardWork(p,.035);spawnParticles("dust",site.x,site.y,2);if(site.progress>=100){site.progress=100;site.complete=true;addEvent(`${p.name} completed the ${site.type}.`,"building");if(site.type==="hut"){discover("Shelter","The settlement mastered permanent shelter.");assignHomes()}if(site.type==="stockpile")discover("Storage","A communal stockpile established shared storage.");if(site.type==="farm")discover("Agriculture","The first fields were prepared for agriculture.");if(site.type==="granary")discover("Granaries","A granary was completed to protect the harvest.");if(site.type==="mine"){discover("Mining","First Hearth opened its first mine shaft.");openMineShaft(site)}}return true}}
+  if(p.job==="Farmer"){const f=findFarmWork(p);if(f){p.goal="Tend fields";if(!atTarget(p,f,2)){moveToward(p,f);return true}if(f.crop>=100){p.carryType="food";p.carryAmount=5+Math.floor(skillLevel(p,"Farmer")/35);f.crop=8;gainSkill(p,"Farmer",.18);rewardWork(p,.06);spawnParticles("grain",f.x,f.y,8);return true}if(f.crop<15)f.crop=18;gainSkill(p,"Farmer",.035);return true}}
+  if(p.job==="Miner"){const target=nearestTile(p,(i)=>rocks[i]>0||iron[i]>0||gold[i]>0,34);if(target){p.goal="Mine minerals";if(!atTarget(p,target,1)){moveToward(p,target);return true}const i=idx(target.x,target.y);if(gold[i]>0){gold[i]--;p.carryType="gold"}else if(iron[i]>0){iron[i]--;p.carryType="iron"}else{rocks[i]--;p.carryType="stone"}p.carryAmount=1+(Math.random()<skillLevel(p,"Miner")/180?1:0);gainSkill(p,"Miner",.14);rewardWork(p,.06);spawnParticles("stone",p.x,p.y,5);return true}}
+  if(p.job==="Woodcutter"){const target=nearestTile(p,(i)=>trees[i]>0,34);if(target){p.goal="Cut wood";if(!atTarget(p,target,1)){moveToward(p,target);return true}const i=idx(target.x,target.y);trees[i]--;p.carryType="wood";p.carryAmount=1+(Math.random()<skillLevel(p,"Woodcutter")/150?1:0);gainSkill(p,"Woodcutter",.13);rewardWork(p,.045);spawnParticles("leaf",p.x,p.y,6);return true}}
+  if(p.job==="Hauler"){const f=buildingsOf("farm").find(f=>f.crop>=100);if(f){p.goal="Collect harvest";if(!atTarget(p,f,2)){moveToward(p,f);return true}p.carryType="food";p.carryAmount=4+Math.floor(skillLevel(p,"Hauler")/45);f.crop=12;gainSkill(p,"Hauler",.10);rewardWork(p,.04);return true}}
+  const target=nearestTile(p,(i)=>food[i]>0,34);if(target){p.goal="Gather food";if(!atTarget(p,target,1)){moveToward(p,target);return true}const i=idx(target.x,target.y);food[i]--;p.carryType="food";p.carryAmount=2+(Math.random()<skillLevel(p,"Gatherer")/160?1:0);gainSkill(p,"Gatherer",.11);rewardWork(p,.035);return true}
   wander(p);return true;
 }
 function homeCapacity(){return buildingsOf("hut").length*4+2}
@@ -684,6 +944,11 @@ function tryBirths(){
 
     const sex=Math.random()<.5?"F":"M",name=generateUniqueName(null,childSurname);
     const baby=makePerson(name,mother.x,mother.y,sex,0,[mother.id,father.id]);
+    for(const k of ["bravery","work","social","curiosity","kindness"]){
+      baby.traits[k]=clamp(((mother.traits?.[k]||.5)+(father.traits?.[k]||.5))/2+rnd(-.13,.13),.12,.95)
+    }
+    baby.lifespan=clamp((mother.lifespan+father.lifespan)/2+rnd(-8,8),62,98);
+    baby.education=0;baby.longGoal="Grow up safely";
     mother.children.push(baby.id);father.children.push(baby.id);
     mother.lastBirthDay=day;
     settlement.food=Math.max(0,settlement.food-6);
@@ -697,14 +962,15 @@ function tryBirths(){
   }
 }
 function eatFromStores(p){if(p.hunger<58)return false;if(settlement.food>0){settlement.food--;p.hunger=clamp(p.hunger-36,0,100);p.goal="Eat";return true}return false}
-function think(p){if(!p.alive)return;p.px+=(p.x-p.px)*.23;p.py+=(p.y-p.py)*.23;p.phase+=.22;p.hunger+=p.age<6?.020:.030;p.thirst+=.043;p.energy-=p.age<6?.010:.016;p.age+=.00011;aiUpdateMind(p);
-  const pi=idx(clamp(Math.round(p.x),0,WORLD_W-1),clamp(Math.round(p.y),0,WORLD_H-1));if(p.layer!=="underground"){if(terrain[pi]===T.LAVA)p.health-=1.6;else if(burn[pi]>110)p.health-=.30}else if(underground[pi]===U.MAGMA)p.health-=1.8;if(p.hunger>92||p.thirst>94)p.health-=.09;else if(p.health<100&&p.hunger<55&&p.thirst<55)p.health+=.014;if(p.health<=0){p.alive=false;settlement.deaths++;addEvent(`${p.name} died at age ${Math.floor(p.age)}.`,"citizen");return}
+function think(p){if(!p.alive)return;p.px+=(p.x-p.px)*.23;p.py+=(p.y-p.py)*.23;p.phase+=.22;p.hunger+=p.age<6?.020:.030;p.thirst+=.043;p.energy-=p.age<6?.010:.016;p.age+=.00011;if(!updateAging(p))return;aiUpdateMind(p);
+  const pi=idx(clamp(Math.round(p.x),0,WORLD_W-1),clamp(Math.round(p.y),0,WORLD_H-1));if(p.layer!=="underground"){if(terrain[pi]===T.LAVA)p.health-=1.6;else if(burn[pi]>110)p.health-=.30}else if(underground[pi]===U.MAGMA)p.health-=1.8;if(p.hunger>92||p.thirst>94)p.health-=.09;else if(p.health<100&&p.hunger<55&&p.thirst<55)p.health+=.014;if(p.health<=0){const cause=p.hunger>92?"starvation":p.thirst>94?"dehydration":terrain[pi]===T.LAVA||underground[pi]===U.MAGMA?"burns":"injury";handleDeath(p,cause);return}
   if(aiFlee(p))return;
   if(p.layer==="underground"&&p.job==="Miner"){p.mood="Working below";workMinerUnderground(p);return}
   if(p.thirst>60){p.goal="Find water";p.mood="Thirsty";if(nearWater(p))p.thirst=clamp(p.thirst-20,0,100);else moveToward(p,nearestTile(p,(i)=>terrain[i]===T.WATER,36));return}
   if(eatFromStores(p))return;
   if(p.energy<22){p.goal="Rest";p.mood="Tired";const home=nearestBuilding(p,"hut")||nearestBuilding(p,"firepit");if(home&&!atTarget(p,home,2))moveToward(p,home);else p.energy=clamp(p.energy+.8,0,100);return}
-  if(p.age<14){p.job="Child";p.goal="Stay near home";const home=nearestBuilding(p,"hut")||nearestBuilding(p,"firepit");if(home&&Math.hypot(p.x-home.x,p.y-home.y)>7)moveToward(p,home);else if(Math.random()<.08)wander(p);return}
+  if(p.age<14){p.job="Child";teachChild(p);const home=homeFor(p)||nearestBuilding(p,"hut")||nearestBuilding(p,"firepit");p.goal=p.education<55?"Learn and stay near home":"Explore near home";if(home&&Math.hypot(p.x-home.x,p.y-home.y)>7)moveToward(p,home);else if(Math.random()<.08+(p.traits?.curiosity||.5)*.03)wander(p);return}
+  if(p.age<18){teachChild(p);if(p.job==="Child")p.job=p.preferredJob||"Gatherer"}
   if(aiSocialize(p))return;
   p.mood=p.stress>65?"Stressed":"Focused";workPerson(p);
 }
@@ -725,7 +991,7 @@ function planVillage(){const pop=people.filter(p=>p.alive).length,huts=buildings
 }
 function updateFarms(){for(const f of buildingsOf("farm")){const i=idx(clamp(Math.round(f.x),0,WORLD_W-1),clamp(Math.round(f.y),0,WORLD_H-1));const rain=wet[i]>0?1.7:1;f.crop=clamp(f.crop+.045*rain,0,100)}}
 function consumeSettlement(){const alive=people.filter(p=>p.alive).length;if(tick%420===0&&alive>0)settlement.food=Math.max(0,settlement.food-Math.max(1,Math.floor(alive/4)))}
-function simulate(){if(paused)return;const loops=speed===1?1:speed===2?2:5;for(let l=0;l<loops;l++){tick++;day+=.008;people.forEach(think);updateCritters();buildings.forEach(b=>b.age++);updateFarms();consumeSettlement();if(tick%95===0)updateRelationships();if(tick%120===0)assignJobs();if(tick%190===0){planVillage();matchPartners();tryBirths()}if(tick%280===0){for(let n=0;n<280;n++){const x=rndi(0,WORLD_W-1),y=rndi(0,WORLD_H-1),i=idx(x,y);if(terrain[i]===T.GRASS&&food[i]<4&&Math.random()<.15)food[i]++;if(terrain[i]===T.FOREST&&trees[i]<4&&Math.random()<.18)trees[i]++;if(wet[i])wet[i]--;if(scar[i])scar[i]--;if(burn[i])burn[i]=Math.max(0,burn[i]-2)}dirty=true}}
+function simulate(){if(paused)return;const loops=speed===1?1:speed===2?2:5;for(let l=0;l<loops;l++){tick++;day+=.008;people.forEach(think);updateCritters();buildings.forEach(b=>b.age++);updateFarms();consumeSettlement();if(tick%95===0)updateRelationships();if(tick%120===0)assignJobs();if(tick%160===0)livingCivUpdate();if(tick%190===0){planVillage();matchPartners();tryBirths()}if(tick%280===0){for(let n=0;n<280;n++){const x=rndi(0,WORLD_W-1),y=rndi(0,WORLD_H-1),i=idx(x,y);if(terrain[i]===T.GRASS&&food[i]<4&&Math.random()<.15)food[i]++;if(terrain[i]===T.FOREST&&trees[i]<4&&Math.random()<.18)trees[i]++;if(wet[i])wet[i]--;if(scar[i])scar[i]--;if(burn[i])burn[i]=Math.max(0,burn[i]-2)}dirty=true}}
   particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.life--;p.vy+=p.type==="leaf"?.006:0});particles=particles.filter(p=>p.life>0);clouds.forEach(c=>{c.life--;c.phase+=.015;c.x+=.015});clouds=clouds.filter(c=>c.life>0);updateUI()}
 
 function generate(useExistingSeed=false){
@@ -807,7 +1073,7 @@ function generate(useExistingSeed=false){
   for(let n=0;n<wolfCount;n++)spawnCritter("wolf",sx+rndi(-42,42),sy+rndi(-32,32),1);
 
   addEvent(`${people.map(p=>p.name).slice(0,2).join(" and ")} founded First Hearth in a ${WORLD_W}×${WORLD_H} world, seed ${worldSeed}.`,"founding");
-  assignJobs();clampCamera();updateUI();
+  assignJobs();assignHomes();for(const p of people)updateEmotionalLife(p);clampCamera();updateUI();
   showToast(useExistingSeed?"World reset":"New customized world created")
 }
 
@@ -994,16 +1260,22 @@ function renderCivilization(){if(!settlement)return;const counts=jobCounts(),com
 function showCitizen(p){
   selected=p.id;
   citizenName.textContent=p.name;
-  citizenSub.textContent=`${Math.floor(p.age)} · ${p.sex==="F"?"Female":"Male"} · ${p.layer==="underground"?"Underground":"Surface"}`;
+  citizenSub.textContent=`${Math.floor(p.age)} · ${p.lifeStage||lifeStageFor(p.age)} · ${p.alive?"Living":"Deceased"}`;
   const partner=p.partner?people.find(q=>q.id===p.partner):null;
-  const parents=p.parents.map(id=>people.find(q=>q.id===id)).filter(Boolean);
+  const parents=(p.parents||[]).map(id=>people.find(q=>q.id===id)).filter(Boolean);
+  const children=(p.children||[]).map(id=>people.find(q=>q.id===id)).filter(Boolean);
+  const mentor=p.mentorId?people.find(q=>q.id===p.mentorId):null;
+  const home=homeFor(p),best=p.bestFriendId?people.find(q=>q.id===p.bestFriendId):null,rival=p.rivalId?people.find(q=>q.id===p.rivalId):null;
   const bond=partner?Math.round(relationshipBond(p,partner)):0;
-  const relationLabel=p.relationshipStage==="married"?"💍 Married":p.relationshipStage==="dating"?"❤️ Dating":"Single";
-  citizenBody.innerHTML=`<div class="stats"><div class="stat">❤️ Health<b>${Math.round(p.health)}%</b></div><div class="stat">⚡ Energy<b>${Math.round(p.energy)}%</b></div><div class="stat">🍖 Hunger<b>${Math.round(p.hunger)}%</b></div><div class="stat">💧 Thirst<b>${Math.round(p.thirst)}%</b></div></div>
-  <div class="citizenRow"><span class="jobBadge">🛠 ${escapeHtml(p.job)}</span> <span class="jobBadge">🧠 ${escapeHtml(aiTraitLabel(p))}</span><br><b>Current goal:</b> ${escapeHtml(p.goal)}<br><b>Long goal:</b> ${escapeHtml(p.longGoal||"Build a stable life")}<br><b>Mood:</b> ${escapeHtml(p.mood)}<br><b>Decision:</b> ${escapeHtml(p.decisionReason||"Observing the world")}</div>
-  ${p.carryAmount?`<div class="carry">Carrying ${p.carryAmount} ${p.carryType}</div>`:""}
-  <div class="family"><b>Status:</b> ${relationLabel}<br><b>Partner:</b> ${partner?escapeHtml(partner.name):"None"}${partner?`<br><b>Relationship bond:</b> ${bond}/100`:""}${p.relationshipStage==="married"?`<br><b>Family surname:</b> ${escapeHtml(surnameOf(p))}<br><b>Married:</b> Day ${p.marriageDay}`:""}<br><b>Birth name:</b> ${escapeHtml(p.birthName||p.name)}<br><b>Parents:</b> ${parents.length?parents.map(x=>escapeHtml(x.name)).join(", "):"—"}<br><b>Children:</b> ${p.children.length}</div>
-  <div class="memory">Latest memory: ${escapeHtml(p.memory[0]||"None")}</div>`;
+  const relationLabel=p.relationshipStage==="married"?"💍 Married":p.relationshipStage==="dating"?"❤️ Dating":p.relationshipStage==="widowed"?"🕯 Widowed":"Single";
+  const skillRows=skillJobs.map(j=>`<div class="skillLine"><span>${j}</span><b>${skillTitle(skillLevel(p,j))} ${skillLevel(p,j)}</b></div>`).join("");
+  citizenBody.innerHTML=`<div class="stats"><div class="stat">❤️ Health<b>${Math.round(p.health)}%</b></div><div class="stat">😊 Happy<b>${Math.round(p.happiness||0)}%</b></div><div class="stat">⚡ Energy<b>${Math.round(p.energy)}%</b></div><div class="stat">😟 Stress<b>${Math.round(p.stress||0)}%</b></div></div>
+  <div class="citizenRow"><span class="jobBadge">🛠 ${escapeHtml(p.job)}</span> <span class="jobBadge">🧠 ${escapeHtml(aiTraitLabel(p))}</span> <span class="jobBadge">📖 ${Math.round(p.education||0)} edu</span><br><b>Current goal:</b> ${escapeHtml(p.goal)}<br><b>Life goal:</b> ${escapeHtml(p.longGoal||"Build a stable life")}<br><b>Mood:</b> ${escapeHtml(p.mood)}<br><b>Why:</b> ${escapeHtml(p.decisionReason||"Observing the world")}</div>
+  <div class="family"><b>Status:</b> ${relationLabel}<br><b>Partner:</b> ${partner?escapeHtml(partner.name):"None"}${partner?`<br><b>Relationship bond:</b> ${bond}/100`:""}${p.relationshipStage==="married"?`<br><b>Family surname:</b> ${escapeHtml(surnameOf(p))}<br><b>Married:</b> Day ${p.marriageDay}`:""}<br><b>Birth name:</b> ${escapeHtml(p.birthName||p.name)}<br><b>Parents:</b> ${parents.length?parents.map(x=>escapeHtml(x.name)).join(", "):"—"}<br><b>Children:</b> ${children.length?children.map(x=>escapeHtml(x.name)).join(", "):"None"}<br><b>Home:</b> ${home?`Hut #${home.id}`:"No permanent home"}<br><b>Mentor:</b> ${mentor?escapeHtml(mentor.name):"None"}</div>
+  <div class="citizenRow"><b>Best friend:</b> ${best?escapeHtml(best.name):"None yet"}<br><b>Rival:</b> ${rival?escapeHtml(rival.name):"None"}<br><b>Wealth:</b> ${(p.wealth||0).toFixed(1)} · <b>Reputation:</b> ${Math.round(p.reputation||0)}<br><b>Possessions:</b> ${p.possessions?.tools||0} tools · ${p.possessions?.keepsakes||0} keepsakes</div>
+  <div class="skillBox"><b>Skills</b>${skillRows}</div>
+  <div class="memory"><b>Life memories</b><br>${(p.memory||[]).slice(0,5).map(m=>`• ${escapeHtml(m)}`).join("<br>")||"None"}</div>
+  ${!p.alive?`<div class="warningBox"><b>Died:</b> Day ${p.deathDay||"?"} · ${escapeHtml(p.causeOfDeath||"unknown cause")}</div>`:""}`;
   citizen.classList.remove("hidden")
 }
 const toolMeta={
@@ -1103,19 +1375,35 @@ function worldResetHtml(){
 }
 function worldOverviewHtml(){
   return `<div class="menuHero"><div class="eyebrow">Current world · ${worldAreaLabel()}</div><h3>${escapeHtml(settlement.name)}</h3><p>Day ${Math.floor(day)} · ${eraName()} · Seed ${worldSeed}</p></div>
-  <div class="menuGrid"><div class="menuStat"><small>Population</small><b>${people.filter(p=>p.alive).length}</b></div><div class="menuStat"><small>Wild creatures</small><b>${critters.length}</b></div><div class="menuStat"><small>Buildings</small><b>${buildings.filter(b=>b.complete).length}</b></div><div class="menuStat"><small>Discoveries</small><b>${settlement.tech.size}</b></div></div>
+  <div class="menuGrid"><div class="menuStat"><small>Population</small><b>${people.filter(p=>p.alive).length}</b></div><div class="menuStat"><small>Families</small><b>${new Set(people.filter(p=>p.alive).map(p=>surnameOf(p))).size}</b></div><div class="menuStat"><small>Avg happiness</small><b>${people.some(p=>p.alive)?Math.round(people.filter(p=>p.alive).reduce((s,p)=>s+(p.happiness||0),0)/people.filter(p=>p.alive).length):0}%</b></div><div class="menuStat"><small>Discoveries</small><b>${settlement.tech.size}</b></div></div>
   <div class="menuSection">World makeup</div>
   <div class="civRows"><div class="civRow"><span>🌿 Habitable land</span><span>${Math.round((tileCount(T.GRASS)+tileCount(T.FOREST)+tileCount(T.SAND))/N*100)}%</span></div><div class="civRow"><span>🌊 Water</span><span>${Math.round((tileCount(T.WATER)+tileCount(T.DEEP))/N*100)}%</span></div><div class="civRow"><span>⛰ Mountain / snow</span><span>${Math.round((tileCount(T.MOUNTAIN)+tileCount(T.SNOW))/N*100)}%</span></div><div class="civRow"><span>🌋 Lava</span><span>${tileCount(T.LAVA)} tiles</span></div><div class="civRow"><span>⛏ Underground mines</span><span>${buildingsOf("mine").length}</span></div><div class="civRow"><span>⛓ Underground iron</span><span>${undergroundCount(uIron)}</span></div><div class="civRow"><span>🟡 Underground gold</span><span>${undergroundCount(uGold)}</span></div></div>`
 }
 function peopleHtml(){
   const alive=people.filter(p=>p.alive);
   if(!alive.length)return `<div class="emptyState">There are no living people in this world.</div>`;
-  return `<div class="menuHero"><div class="eyebrow">Population</div><h3>${alive.length} living people</h3><p>Tap a person to open their full citizen card.</p></div>${alive.slice().sort((a,b)=>a.age-b.age).map(p=>`<button class="listCard" data-person="${p.id}" type="button"><div class="avatar">${p.sex==="F"?"👩":"👨"}</div><div class="grow"><b>${escapeHtml(p.name)}</b><small>${p.relationshipStage==="married"?"💍 Married · ":p.relationshipStage==="dating"?"❤️ Dating · ":""}${escapeHtml(aiTraitLabel(p))} · age ${Math.floor(p.age)} · ${escapeHtml(p.job)}</small></div><div class="rightText">❤️ ${Math.round(p.health)}<br>${p.children.length} child${p.children.length===1?"":"ren"}</div></button>`).join("")}`
+  return `<div class="menuHero"><div class="eyebrow">Living Civilization</div><h3>${alive.length} living people</h3><p>${alive.filter(p=>p.age<18).length} young · ${alive.filter(p=>p.lifeStage==="Elder").length} elders · avg happiness ${Math.round(alive.reduce((s,p)=>s+(p.happiness||0),0)/alive.length)}%</p></div>${alive.slice().sort((a,b)=>a.age-b.age).map(p=>`<button class="listCard" data-person="${p.id}" type="button"><div class="avatar">${p.age<14?"🧒":p.lifeStage==="Elder"?"🧓":p.sex==="F"?"👩":"👨"}</div><div class="grow"><b>${escapeHtml(p.name)}</b><small>${p.relationshipStage==="married"?"💍 ":p.relationshipStage==="dating"?"❤️ ":""}${escapeHtml(p.lifeStage)} · ${escapeHtml(p.job)} · ${skillTitle(skillLevel(p,p.job))}</small></div><div class="rightText">😊 ${Math.round(p.happiness||0)}<br>💰 ${(p.wealth||0).toFixed(0)}</div></button>`).join("")}`
+}
+function familyRegistryHtml(){
+  const all=[...people];
+  if(!all.length)return `<div class="emptyState">No families exist yet.</div>`;
+  const families=new Map();
+  for(const p of all){
+    const s=surnameOf(p);
+    if(!families.has(s))families.set(s,[]);
+    families.get(s).push(p)
+  }
+  const cards=[...families.entries()].sort((a,b)=>b[1].filter(p=>p.alive).length-a[1].filter(p=>p.alive).length).map(([surname,members])=>{
+    const living=members.filter(p=>p.alive),married=Math.floor(living.filter(p=>p.relationshipStage==="married").length/2),children=living.filter(p=>p.age<18).length;
+    return `<div class="familyCard"><div class="familyCardHead"><div><b>${escapeHtml(surname)} family</b><small>${living.length} living · ${children} young · ${married} married pair${married===1?"":"s"}</small></div><span>🏠</span></div><div class="familyMembers">${members.slice().sort((a,b)=>a.age-b.age).map(p=>`<button data-person="${p.id}" type="button">${p.alive?"":"† "}${escapeHtml(p.name)} <small>${Math.floor(p.age)} · ${escapeHtml(p.lifeStage||lifeStageFor(p.age))}</small></button>`).join("")}</div></div>`
+  }).join("");
+  return `<div class="menuHero"><div class="eyebrow">Family Registry</div><h3>${families.size} family names</h3><p>Living and deceased relatives remain part of the civilization's recorded lineage.</p></div>${cards}`
 }
 function villageHtml(){
-  const counts=jobCounts(),complete=buildings.filter(b=>b.complete),pending=buildings.filter(b=>!b.complete);
+  const counts=jobCounts(),complete=buildings.filter(b=>b.complete),pending=buildings.filter(b=>!b.complete),alive=people.filter(p=>p.alive),homes=new Set(alive.map(p=>p.homeId).filter(Boolean)).size,avgHappy=alive.length?Math.round(alive.reduce((s,p)=>s+(p.happiness||0),0)/alive.length):0,avgEdu=alive.length?Math.round(alive.reduce((s,p)=>s+(p.education||0),0)/alive.length):0;
   return `<div class="menuHero"><div class="eyebrow">Village</div><h3>${escapeHtml(settlement.name)}</h3><p>${eraName()} · capacity ${homeCapacity()} · ${pending.length} active construction project${pending.length===1?"":"s"}</p></div>
   <div class="resourceGrid"><div class="resourceCard">🍎 Food<b>${Math.floor(settlement.food)}</b></div><div class="resourceCard">🪵 Wood<b>${Math.floor(settlement.wood)}</b></div><div class="resourceCard">🪨 Stone<b>${Math.floor(settlement.stone)}</b></div><div class="resourceCard">⛓ Iron<b>${Math.floor(settlement.iron||0)}</b></div><div class="resourceCard">🟡 Gold<b>${Math.floor(settlement.gold||0)}</b></div></div>
+  <div class="menuSection">Society</div><div class="civRows"><div class="civRow"><span>😊 Average happiness</span><span>${avgHappy}%</span></div><div class="civRow"><span>📖 Average education</span><span>${avgEdu}</span></div><div class="civRow"><span>🏠 Occupied homes</span><span>${homes}</span></div><div class="civRow"><span>🧓 Elders</span><span>${alive.filter(p=>p.lifeStage==="Elder").length}</span></div><div class="civRow"><span>🧒 Young people</span><span>${alive.filter(p=>p.age<18).length}</span></div></div>
   <div class="menuSection">Jobs</div><div class="civRows">${Object.entries(counts).map(([k,v])=>`<div class="civRow"><span>${escapeHtml(k)}</span><span>${v}</span></div>`).join("")}</div>
   <div class="menuSection">Buildings</div><div class="civRows">${["firepit","hut","stockpile","farm","mine","granary","workshop"].map(t=>`<div class="civRow"><span>${t[0].toUpperCase()+t.slice(1)}</span><span>${buildingsOf(t).length}</span></div>`).join("")}</div>
   <div class="menuSection">Discoveries</div><div class="techList">${techNames.map(t=>`<span class="tech ${hasTech(t)?"":"locked"}">${hasTech(t)?"✓ ":""}${t}</span>`).join("")}</div>`
@@ -1135,8 +1423,8 @@ function settingsHtml(){
   <div class="menuSection">World management</div><button class="bigAction" data-action="center-world" type="button">⌾ Center on First Hearth</button><button class="bigAction" data-action="open-world-creator" type="button">🌍 Open World Creator</button><button class="bigAction danger" data-action="open-world-reset" type="button">↺ Reset Current World</button>`
 }
 function updatesHtml(){
-  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V5.4 · World Scale</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
-  <div class="updateItem"><b>V5.4 — World Scale</b><small>Current</small><p>Choose 100×100, 150×150, 200×200, 300×300 or 500×500 worlds. Default is now 200×200, and surface, underground, Atlas, camera and simulation arrays all resize together.</p></div><div class="updateItem"><b>V5.3 — Family & Marriage</b><small>Previous</small><p>Dating, emotional bonds, marriage, shared surnames, breakups and child surname inheritance.</p></div><div class="updateItem"><b>V5.2 — Responsive World</b><small>Previous</small><p>Responsive landscape catalogs, smaller wording and procedural unique names.</p></div><div class="updateItem"><b>V5.1 — Living World</b><small>Previous</small><p>Compact HUD, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs and relationships.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
+  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V6 · Living Civilization</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
+  <div class="updateItem"><b>V6 — Living Civilization</b><small>Current</small><p>Citizens now age through life stages, learn as children, build job skills, change careers more intelligently, form households, accumulate wealth and possessions, develop friendships and rivals, experience grief, inherit traits, grow old and die naturally. The World menu now includes a persistent Family Registry.</p></div><div class="updateItem"><b>V5.4 — World Scale</b><small>Previous</small><p>Dynamic 100×100 through 500×500 world sizes.</p></div><div class="updateItem"><b>V5.3 — Family & Marriage</b><small>Previous</small><p>Dating, emotional bonds, marriage, shared surnames, breakups and child surname inheritance.</p></div><div class="updateItem"><b>V5.2 — Responsive World</b><small>Previous</small><p>Responsive landscape catalogs, smaller wording and procedural unique names.</p></div><div class="updateItem"><b>V5.1 — Living World</b><small>Previous</small><p>Compact HUD, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs and relationships.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
   <div class="updateItem"><b>V4.1 — Underground</b><small>Previous</small><p>Surface/Underground toggle, caves, deep stone, underground lakes, magma, iron/gold/coal/crystal veins, mine entrances, tunneling miners and layer-aware god powers.</p></div>
   <div class="updateItem"><b>V4 — World Control</b><small>Previous</small><p>World, God Powers and Resources tabs; full people/village/history/settings panels; biome painting; fire and lava; iron and gold; wildlife; direct people spawning; persistent visual settings.</p></div>
   <div class="updateItem"><b>V3 — Civilization</b><small>Previous</small><p>Families, jobs, farms, stockpiles, building construction, discoveries and village growth.</p></div>
@@ -1145,8 +1433,8 @@ function updatesHtml(){
 function renderWorldTab(){
   menuTitle.textContent="World";menuSubtitle.textContent="People, villages, history and settings";
   menuSegments.classList.remove("hidden");
-  menuSegments.innerHTML=sectionButton("overview","Overview")+sectionButton("creator","World Creator")+sectionButton("reset","Reset")+sectionButton("people","People")+sectionButton("village","Village")+sectionButton("war","War")+sectionButton("history","History")+sectionButton("settings","Settings")+sectionButton("updates","Updates");
-  const pages={overview:worldOverviewHtml,creator:worldCreatorHtml,reset:worldResetHtml,people:peopleHtml,village:villageHtml,war:warHtml,history:historyHtml,settings:settingsHtml,updates:updatesHtml};menuBody.innerHTML=(pages[worldSection]||worldOverviewHtml)()
+  menuSegments.innerHTML=sectionButton("overview","Overview")+sectionButton("people","People")+sectionButton("families","Families")+sectionButton("village","Village")+sectionButton("creator","World Creator")+sectionButton("reset","Reset")+sectionButton("war","War")+sectionButton("history","History")+sectionButton("settings","Settings")+sectionButton("updates","Updates");
+  const pages={overview:worldOverviewHtml,people:peopleHtml,families:familyRegistryHtml,village:villageHtml,creator:worldCreatorHtml,reset:worldResetHtml,war:warHtml,history:historyHtml,settings:settingsHtml,updates:updatesHtml};menuBody.innerHTML=(pages[worldSection]||worldOverviewHtml)()
 }
 function renderPowersTab(){
   menuTitle.textContent="God Powers";menuSubtitle.textContent=`Transform the ${resourceLayer==="surface"?"surface":"underground"}`;

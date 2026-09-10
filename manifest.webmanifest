@@ -1,7 +1,7 @@
 {
   "name": "Tiny World",
   "short_name": "Tiny World",
-  "description": "A dynamically sized civilization sandbox with 100\u00d7100 through 500\u00d7500 worlds, families, marriage, underground simulation and god powers.",
+  "description": "A living civilization sandbox where citizens age, learn, form families, build skills, make friends and rivals, grieve, work, grow old and leave histories behind.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
