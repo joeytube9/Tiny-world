@@ -61,7 +61,7 @@ const divineFearful=new Set(["lightning","fire","lava","drought","water","mounta
 
 let people=[],buildings=[],events=[],particles=[],clouds=[],constructionQueue=[],critters=[],visualEffects=[],settlements=[],kingdoms=[],wars=[],tradeRoutes=[],cultures=[],religions=[],holySites=[],divineChronicle=[];
 let settlement=null,day=1,tick=0,paused=false,speed=1,tool="inspect",brush=12,selected=null,dirty=true,worldSeed=1,visualTime=0,selectedSettlementId=1,nextSettlementId=1,nextKingdomId=1,nextWarId=1,nextCultureId=1,nextReligionId=1,nextHolySiteId=1,atlasMode="political";
-let camX=WORLD_W/2,camY=WORLD_H/2,zoom=4,displayScale=1,pointers=new Map(),dragging=false,last={x:0,y:0},pinchStart=null,paintStamp=0,lastSim=0,toastTimer=null,nextPersonId=1,nextBuildingId=1,nextCritterId=1;
+let camX=WORLD_W/2,camY=WORLD_H/2,zoom=4,displayScale=1,pointers=new Map(),dragging=false,last={x:0,y:0},pinchStart=null,paintStamp=0,lastPaintWorld=null,currentPaintStroke=0,lastSim=0,toastTimer=null,nextPersonId=1,nextBuildingId=1,nextCritterId=1;
 let mainTab="world",worldSection="overview",newWorldArmed=false,resetWorldArmed=false;
 let activeLayer="surface",resourceLayer="surface",undergroundDirty=true;
 const defaultWorldConfig={seed:"random",worldSize:200,landmass:50,water:50,forest:52,mountains:42,wildlife:50,startPopulation:6,startingFood:18,startingWood:8};
@@ -994,7 +994,9 @@ function spawnFireBurst(x,y,r){
   visualEffects.push({type:"fireBurst",x,y,r:Math.max(2,r*.28),start:visualTime,duration:.70,seed:Math.random()*10000})
 }
 function paint(cx,cy,r,type,record=true){
-  for(let y=Math.max(0,Math.floor(cy-r-4));y<=Math.min(WORLD_H-1,Math.ceil(cy+r+4));y++)for(let x=Math.max(0,Math.floor(cx-r-4));x<=Math.min(WORLD_W-1,Math.ceil(cx+r+4));x++){
+  const terrainChanging=type==="land"||type==="water"||type==="grass"||type==="forest"||type==="sand"||type==="snow"||type==="mountain"||type==="lava";
+  const pad=terrainChanging?4:1;
+  for(let y=Math.max(0,Math.floor(cy-r-pad));y<=Math.min(WORLD_H-1,Math.ceil(cy+r+pad));y++)for(let x=Math.max(0,Math.floor(cx-r-pad));x<=Math.min(WORLD_W-1,Math.ceil(cx+r+pad));x++){
     const n=brushNoise(x,y,cx,cy,r);if(n>1)continue;
     const i=idx(x,y),p=Math.max(0,1-n);
     if(type==="land"){height[i]=clamp(height[i]+.14+p*.19,.405,.82);classify(i);if(terrain[i]===T.SAND&&p>.43)terrain[i]=T.GRASS}
@@ -1005,7 +1007,9 @@ function paint(cx,cy,r,type,record=true){
     else if(type==="snow"){height[i]=.88;terrain[i]=T.SNOW;trees[i]=food[i]=burn[i]=0}
     else if(type==="mountain"){height[i]=.78;terrain[i]=T.MOUNTAIN;if(Math.random()<.18)rocks[i]=clamp(rocks[i]+1,0,5);burn[i]=0}
     else if(type==="food"&&(terrain[i]===T.GRASS||terrain[i]===T.FOREST)){if(Math.random()<.12+.45*p)food[i]=clamp(food[i]+1,0,7)}
-    else if(type==="trees"&&(terrain[i]===T.GRASS||terrain[i]===T.FOREST)){terrain[i]=T.FOREST;trees[i]=clamp(trees[i]+(Math.random()<.55?2:1),0,7)}
+    else if(type==="trees"&&(terrain[i]===T.GRASS||terrain[i]===T.FOREST)){
+      if(hash(x,y,worldSeed+currentPaintStroke*17)>.18)trees[i]=clamp(trees[i]+(Math.random()<.38?2:1),0,7)
+    }
     else if(type==="stone"&&terrain[i]>=T.SAND&&terrain[i]!==T.LAVA){if(Math.random()<.15+.5*p)rocks[i]=clamp(rocks[i]+1,0,6)}
     else if(type==="iron"&&terrain[i]>=T.SAND&&terrain[i]!==T.LAVA){if(Math.random()<.10+.35*p)iron[i]=clamp(iron[i]+1,0,5)}
     else if(type==="gold"&&terrain[i]>=T.SAND&&terrain[i]!==T.LAVA){if(Math.random()<.05+.20*p)gold[i]=clamp(gold[i]+1,0,4)}
@@ -1015,7 +1019,10 @@ function paint(cx,cy,r,type,record=true){
     else if(type==="lava"){terrain[i]=T.LAVA;height[i]=.55;trees[i]=food[i]=rocks[i]=iron[i]=gold[i]=0;burn[i]=255;scar[i]=255}
     else if(type==="lightning"&&terrain[i]>=T.SAND&&terrain[i]!==T.SNOW&&terrain[i]!==T.LAVA&&n<.20&&hash(x,y,worldSeed+tick+991)>.79){trees[i]=Math.max(0,trees[i]-2);food[i]=0;scar[i]=Math.max(scar[i],190);burn[i]=Math.max(burn[i],rndi(105,165))}
   }
-  dirty=true;
+
+  // Critical performance fix: resource/effect brushes do not rebuild terrain.
+  if(terrainChanging)dirty=true;
+
   if(type==="rain")spawnCloud(cx,cy,r);
   if(type==="fire"){spawnParticles("fire",cx,cy,14);spawnFireBurst(cx,cy,r)}
   if(type==="lava")spawnParticles("fire",cx,cy,22);
@@ -2037,58 +2044,46 @@ function tileEdgeSoftness(x,y){
   return water/Math.max(1,total)
 }
 function forestDensity(x,y){
-  let n=0;
-  for(let yy=-1;yy<=1;yy++)for(let xx=-1;xx<=1;xx++){
-    const nx=x+xx,ny=y+yy;
-    if(nx<0||ny<0||nx>=WORLD_W||ny>=WORLD_H)continue;
-    const i=idx(nx,ny);
-    if(terrain[i]===T.FOREST&&trees[i]>0)n++
+  const i=idx(clamp(x,0,WORLD_W-1),clamp(y,0,WORLD_H-1));
+  return clamp((trees[i]||0)/7+(terrain[i]===T.FOREST?.18:0),0,1)
+}
+let treeSpriteCache=null;
+function makeTreeSprite(kind,variant=0){
+  const c=document.createElement("canvas");c.width=96;c.height=112;const g=c.getContext("2d"),cx=48;
+  g.clearRect(0,0,c.width,c.height);
+  if(kind==="clump"){
+    g.fillStyle="rgba(0,0,0,.18)";g.beginPath();g.ellipse(cx+3,92,31,8,0,0,Math.PI*2);g.fill();
+    g.fillStyle=variant?"#2f6b3b":"#397947";g.beginPath();g.arc(34,58,18,0,Math.PI*2);g.arc(48,49,22,0,Math.PI*2);g.arc(64,59,18,0,Math.PI*2);g.arc(48,66,20,0,Math.PI*2);g.fill();
+    g.fillStyle="rgba(157,214,126,.48)";g.beginPath();g.arc(43,43,7,0,Math.PI*2);g.arc(59,52,5,0,Math.PI*2);g.fill();return c
   }
-  return n/9
+  g.fillStyle="rgba(0,0,0,.20)";g.beginPath();g.ellipse(cx+4,97,30,7,0,0,Math.PI*2);g.fill();
+  if(kind==="pine"){
+    g.fillStyle=variant?"#735039":"#67472f";g.fillRect(cx-4,48,8,44);
+    const cols=variant?["#326c40","#2b633b","#397a48"]:["#2b633b","#285d38","#347347"],ys=[27,43,60],ws=[23,30,36];
+    for(let n=0;n<3;n++){g.fillStyle=cols[n];g.beginPath();g.moveTo(cx,ys[n]-20);g.lineTo(cx-ws[n],ys[n]+24);g.quadraticCurveTo(cx,ys[n]+16,cx+ws[n],ys[n]+24);g.closePath();g.fill()}
+  }else{
+    g.fillStyle=variant?"#6e4a30":"#7c5636";g.fillRect(cx-5,51,10,42);g.fillStyle=variant?"#347a42":"#3d8448";
+    g.beginPath();g.arc(32,50,20,0,Math.PI*2);g.arc(47,38,24,0,Math.PI*2);g.arc(66,51,19,0,Math.PI*2);g.arc(48,61,23,0,Math.PI*2);g.fill();
+    g.fillStyle="rgba(163,218,128,.50)";g.beginPath();g.arc(42,35,8,0,Math.PI*2);g.arc(61,48,6,0,Math.PI*2);g.fill()
+  }
+  return c
+}
+function ensureTreeSprites(){
+  if(treeSpriteCache)return;
+  treeSpriteCache={pine:[makeTreeSprite("pine",0),makeTreeSprite("pine",1)],broad:[makeTreeSprite("broad",0),makeTreeSprite("broad",1)],clump:[makeTreeSprite("clump",0),makeTreeSprite("clump",1)]}
+}
+function drawCachedTreeSprite(x,y,kind){
+  ensureTreeSprites();const j=treeJitter(x,y),s=worldToScreen(x+.5+j.x,y+.63+j.y),base=clamp(cameraScale(),2.2,13)*j.scale;
+  const variant=hash(x,y,worldSeed+1901)>.5?1:0,sprite=treeSpriteCache[kind][variant],sway=Math.sin(visualTime*.72+x*.29+y*.17)*base*.045;
+  const w=kind==="clump"?base*1.65:base*1.75,h=kind==="clump"?base*1.65:base*2.05;
+  ctx.drawImage(sprite,s.x-w/2+sway,s.y-h*.76,w,h)
 }
 function treeJitter(x,y){
   return {x:(hash(x,y,1701)-.5)*.70,y:(hash(x,y,1702)-.5)*.48,scale:.82+hash(x,y,1703)*.38}
 }
-function drawPineTree(x,y){
-  const j=treeJitter(x,y),s=worldToScreen(x+.5+j.x,y+.63+j.y),z=clamp(cameraScale(),2.6,13)*j.scale,sway=Math.sin(visualTime*1.25+x*.61+y*.28)*z*.06;
-  ctx.fillStyle="rgba(0,0,0,.20)";ctx.beginPath();ctx.ellipse(s.x+z*.12,s.y+z*.86,z*.62,z*.20,0,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle="#68482f";ctx.fillRect(s.x-z*.07,s.y-z*.02,z*.14,z*.92);
-  const layers=[[-.83,.62],[-.49,.77],[-.10,.92]];
-  for(let n=0;n<layers.length;n++){
-    const [yy,w]=layers[n];
-    ctx.fillStyle=n===0?"#2b633b":n===1?"#28603a":"#347347";
-    ctx.beginPath();
-    ctx.moveTo(s.x+sway,s.y+z*(yy-.52));
-    ctx.lineTo(s.x-z*w+sway,s.y+z*(yy+.45));
-    ctx.quadraticCurveTo(s.x,s.y+z*(yy+.25),s.x+z*w+sway,s.y+z*(yy+.45));
-    ctx.closePath();ctx.fill()
-  }
-  ctx.fillStyle="rgba(138,204,135,.42)";ctx.beginPath();ctx.arc(s.x-z*.14+sway,s.y-z*.72,z*.10,0,Math.PI*2);ctx.fill()
-}
-function drawBroadleafTree(x,y){
-  const j=treeJitter(x,y),s=worldToScreen(x+.5+j.x,y+.62+j.y),z=clamp(cameraScale(),2.6,13)*j.scale,sway=Math.sin(visualTime*1.30+x*.58+y*.27)*z*.08,h=hash(x,y,1777);
-  ctx.fillStyle="rgba(0,0,0,.20)";ctx.beginPath();ctx.ellipse(s.x+z*.10,s.y+z*.93,z*.78,z*.23,0,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle=h>.5?"#704b30":"#7d5736";ctx.fillRect(s.x-z*.10,s.y-z*.02,z*.20,z*1.02);
-  ctx.fillStyle=h>.58?"#347845":"#3d8448";
-  ctx.beginPath();
-  ctx.arc(s.x-z*.30+sway,s.y-z*.36,z*.43,0,Math.PI*2);
-  ctx.arc(s.x+z*.08+sway,s.y-z*.56,z*.51,0,Math.PI*2);
-  ctx.arc(s.x+z*.38+sway,s.y-z*.30,z*.38,0,Math.PI*2);
-  ctx.arc(s.x+sway,s.y-z*.14,z*.47,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle="rgba(158,215,126,.50)";
-  ctx.beginPath();ctx.arc(s.x-z*.12+sway,s.y-z*.59,z*.17,0,Math.PI*2);ctx.arc(s.x+z*.23+sway,s.y-z*.42,z*.13,0,Math.PI*2);ctx.fill()
-}
-function drawForestClump(x,y){
-  const j=treeJitter(x,y),s=worldToScreen(x+.5+j.x,y+.64+j.y),z=clamp(cameraScale(),2.0,7.4)*j.scale,h=hash(x,y,worldSeed+770),d=forestDensity(x,y),sway=Math.sin(visualTime*1.20+x*.53+y*.31)*z*.04;
-  ctx.fillStyle="rgba(0,0,0,.15)";ctx.beginPath();ctx.ellipse(s.x,s.y+z*.30,z*(.72+.12*d),z*.19,0,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle=h>.62?"#2c6539":"#367443";
-  ctx.beginPath();
-  ctx.arc(s.x-z*.23+sway,s.y-z*.06,z*(.24+.07*d),0,Math.PI*2);
-  ctx.arc(s.x+z*.01+sway,s.y-z*.15,z*(.29+.08*d),0,Math.PI*2);
-  ctx.arc(s.x+z*.24+sway,s.y-z*.02,z*(.23+.06*d),0,Math.PI*2);
-  ctx.arc(s.x-z*.01+sway,s.y+z*.02,z*(.26+.06*d),0,Math.PI*2);ctx.fill();
-  ctx.fillStyle="rgba(146,207,118,.45)";ctx.beginPath();ctx.arc(s.x-z*.07+sway,s.y-z*.18,z*.10,0,Math.PI*2);ctx.fill()
-}
+function drawPineTree(x,y){drawCachedTreeSprite(x,y,"pine")}
+function drawBroadleafTree(x,y){drawCachedTreeSprite(x,y,"broad")}
+function drawForestClump(x,y){drawCachedTreeSprite(x,y,"clump")}
 
 function drawTree(x,y){
   if(cameraScale()<5.1){drawForestClump(x,y);return}
@@ -2098,26 +2093,25 @@ function drawTerrainFeatures(){
   const b=visibleBounds(5),camZ=cameraScale(),step=adaptiveStep(b,camZ<3?2:1,16000);
   for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){
     const i=idx(x,y),t=terrain[i],gate=hash(x,y,88);
-    if(t===T.FOREST&&trees[i]>0){
-      const d=forestDensity(x,y);
-      if(camZ<5.0){if(gate>.69-d*.13)drawForestClump(x,y)}
-      else if(gate>.18)drawTree(x,y)
+    if((t===T.FOREST||t===T.GRASS)&&trees[i]>0){
+      const density=clamp(trees[i]/7+(t===T.FOREST?.20:0),0,1);
+      if(camZ<5.0){if(gate>.78-density*.28+(step-1)*.04)drawForestClump(x,y)}
+      else if(gate>.28-density*.18+(step-1)*.05)drawTree(x,y)
     }
 
-    // Coastline boulders make the shoreline feel like a miniature landscape.
-    const shore=shorelineFactor(x,y);
-    if((t===T.SAND||t===T.GRASS)&&shore>.18&&hash(x,y,worldSeed+1888)>.91){
-      const j=treeJitter(x,y),s=worldToScreen(x+.5+j.x*.6,y+.55+j.y*.4),z=clamp(camZ,2.5,11);
-      ctx.fillStyle="rgba(0,0,0,.18)";ctx.beginPath();ctx.ellipse(s.x+z*.08,s.y+z*.20,z*.34,z*.13,0,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle="#777d7c";ctx.beginPath();ctx.moveTo(s.x-z*.30,s.y+z*.12);ctx.lineTo(s.x-z*.12,s.y-z*.25);ctx.lineTo(s.x+z*.18,s.y-z*.16);ctx.lineTo(s.x+z*.31,s.y+z*.12);ctx.closePath();ctx.fill();
-      ctx.fillStyle="#afb4b0";ctx.beginPath();ctx.moveTo(s.x-z*.10,s.y-z*.20);ctx.lineTo(s.x+z*.05,s.y-z*.15);ctx.lineTo(s.x+z*.15,s.y-z*.04);ctx.closePath();ctx.fill()
+    if((t===T.SAND||t===T.GRASS)&&hash(x,y,worldSeed+1888)>.91){
+      const shore=shorelineFactor(x,y);
+      if(shore>.18){
+        const j=treeJitter(x,y),s=worldToScreen(x+.5+j.x*.6,y+.55+j.y*.4),z=clamp(camZ,2.5,11);
+        ctx.fillStyle="rgba(0,0,0,.18)";ctx.beginPath();ctx.ellipse(s.x+z*.08,s.y+z*.20,z*.34,z*.13,0,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle="#777d7c";ctx.beginPath();ctx.moveTo(s.x-z*.30,s.y+z*.12);ctx.lineTo(s.x-z*.12,s.y-z*.25);ctx.lineTo(s.x+z*.18,s.y-z*.16);ctx.lineTo(s.x+z*.31,s.y+z*.12);ctx.closePath();ctx.fill()
+      }
     }
 
     if((t===T.MOUNTAIN||t===T.SNOW)&&hash(x,y,610)>.44){
       const s=worldToScreen(x+.5+(hash(x,y,611)-.5)*.35,y+.72+(hash(x,y,612)-.5)*.20),z=clamp(camZ,2,11)*.72;
       ctx.fillStyle="rgba(0,0,0,.22)";ctx.beginPath();ctx.ellipse(s.x+z*.22,s.y+z*.86,z*.92,z*.25,0,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle=t===T.SNOW?"#ccd4d6":"#7c8382";ctx.beginPath();ctx.moveTo(s.x-z*.90,s.y+z*.68);ctx.lineTo(s.x-z*.32,s.y-z*.22);ctx.lineTo(s.x,s.y-z*1.20);ctx.lineTo(s.x+z*.40,s.y-z*.18);ctx.lineTo(s.x+z*.90,s.y+z*.68);ctx.fill();
-      ctx.fillStyle=t===T.SNOW?"#f2f6f7":"#adb3b1";ctx.beginPath();ctx.moveTo(s.x,s.y-z*1.20);ctx.lineTo(s.x-z*.26,s.y-z*.57);ctx.lineTo(s.x+z*.16,s.y-z*.50);ctx.lineTo(s.x+z*.34,s.y-z*.17);ctx.fill()
+      ctx.fillStyle=t===T.SNOW?"#ccd4d6":"#7c8382";ctx.beginPath();ctx.moveTo(s.x-z*.90,s.y+z*.68);ctx.lineTo(s.x-z*.32,s.y-z*.22);ctx.lineTo(s.x,s.y-z*1.20);ctx.lineTo(s.x+z*.40,s.y-z*.18);ctx.lineTo(s.x+z*.90,s.y+z*.68);ctx.fill()
     }
   }
 }
@@ -2538,6 +2532,19 @@ function applyTool(wx,wy,continuous=false){
   if(tool==="lightning")people.forEach(p=>{if(p.alive&&Math.hypot(p.x-wx,p.y-wy)<brush*.35){p.health-=30;p.memory.unshift("Survived divine lightning")}})
 }
 function resizeCanvas(){const rect=canvas.getBoundingClientRect(),dpr=Math.min(window.devicePixelRatio||1,2);displayScale=dpr;const w=Math.max(320,Math.round(rect.width*dpr)),h=Math.max(320,Math.round(rect.height*dpr));if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h}clampCamera()}
+function brushPaintInterval(){
+  if(["trees","food","stone","iron","gold"].includes(tool))return 44;
+  if(["rain","drought","fire","lightning"].includes(tool))return 55;
+  if(["land","water","grass","forest","sand","snow","mountain","lava"].includes(tool))return 62;
+  return 44
+}
+function brushMoveThreshold(){
+  if(["trees","food","stone","iron","gold"].includes(tool))return Math.max(.9,brush*.11);
+  return Math.max(.7,brush*.08)
+}
+function shouldPaintAt(w){
+  return !lastPaintWorld||Math.hypot(w.x-lastPaintWorld.x,w.y-lastPaintWorld.y)>=brushMoveThreshold()
+}
 function canvasPoint(e){const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)/r.width*canvas.width,y:(e.clientY-r.top)/r.height*canvas.height}}
 function sumArray(arr){let n=0;for(let i=0;i<arr.length;i++)n+=arr[i];return n}
 function tileCount(type){let n=0;for(let i=0;i<N;i++)if(terrain[i]===type)n++;return n}
@@ -2676,8 +2683,8 @@ function settingsHtml(){
   <div class="menuSection">World management</div><button class="bigAction" data-action="center-world" type="button">⌾ Center on selected settlement</button><button class="bigAction" data-action="open-world-creator" type="button">🌍 Open World Creator</button><button class="bigAction danger" data-action="open-world-reset" type="button">↺ Reset Current World</button>`
 }
 function updatesHtml(){
-  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V10.0.1 · Performance Core</h3><p>A dedicated optimization release focused on smoother frame pacing and eliminating simulation spikes before V10.1 continues.</p></div>
-  <div class="updateItem"><b>V10.0.1 — Performance Core</b><small>Current</small><p>Major optimization pass: cached world indexes and AI targets, staggered simulation updates, cheaper job assignment, local social/relationship searches, visible-entity culling, adaptive visual detail, particle budgets, throttled Atlas/HUD refreshes, lower backing-texture memory and removal of an unnecessary periodic full terrain rebuild.</p></div><div class="updateItem"><b>V10.0 — Culture, Faith & Economy</b><small>Previous</small><p>Cultures now carry values, customs, festivals and heroes; daughter settlements can culturally diverge. Citizens have personal belief levels and religious stances. Divine actions alter how civilizations perceive the Creator and can create religions, prophets, clergy and holy sites. Settlements run markets with scarcity-driven prices, merchants, social classes, barter and emerging currencies. The Atlas adds Political, Culture, Faith and Economy modes.</p></div><div class="updateItem"><b>V9 — Civilizations & Kingdoms</b><small>Previous</small><p>Population pressure can create new settlements led by real migrating families. Every settlement has resources, buildings, territory, leaders, identity, diplomacy and military strength. Settlements trade, form kingdoms, develop rivalries, fight wars with named citizen casualties, and generate refugees whose citizenship histories persist.</p></div>
+  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V10.0.2 · Fast Brush & Trees</h3><p>A dedicated optimization release focused on smoother frame pacing and eliminating simulation spikes before V10.1 continues.</p></div>
+  <div class="updateItem"><b>V10.0.2 — Fast Brush & Trees</b><small>Current</small><p>Resource brushes no longer rebuild the continuous terrain texture. Tree placement stays a resource instead of silently converting grass into Forest terrain, tree art is cached into reusable sprites, brush stamping is movement/time throttled, and dense-tree rendering is cheaper.</p></div><div class="updateItem"><b>V10.0.1 — Performance Core</b><small>Previous</small><p>Major optimization pass: cached world indexes and AI targets, staggered simulation updates, cheaper job assignment, local social/relationship searches, visible-entity culling, adaptive visual detail, particle budgets, throttled Atlas/HUD refreshes, lower backing-texture memory and removal of an unnecessary periodic full terrain rebuild.</p></div><div class="updateItem"><b>V10.0 — Culture, Faith & Economy</b><small>Previous</small><p>Cultures now carry values, customs, festivals and heroes; daughter settlements can culturally diverge. Citizens have personal belief levels and religious stances. Divine actions alter how civilizations perceive the Creator and can create religions, prophets, clergy and holy sites. Settlements run markets with scarcity-driven prices, merchants, social classes, barter and emerging currencies. The Atlas adds Political, Culture, Faith and Economy modes.</p></div><div class="updateItem"><b>V9 — Civilizations & Kingdoms</b><small>Previous</small><p>Population pressure can create new settlements led by real migrating families. Every settlement has resources, buildings, territory, leaders, identity, diplomacy and military strength. Settlements trade, form kingdoms, develop rivalries, fight wars with named citizen casualties, and generate refugees whose citizenship histories persist.</p></div>
   <div class="updateItem"><b>V8.3 — Natural Coastline Water</b><small>Previous</small><p>Natural shallow-water shelves and coastline-oriented animated surf.</p></div>
   <div class="updateItem"><b>V8.2 — Natural Effects</b><small>Previous</small><p>Lightning is now a real branching strike with a brief flash instead of a grid of hazard markers. Fire uses irregular animated flame clusters and embers. The broad turquoise ocean halo was removed at the terrain-color level, leaving only a narrow coastal shallows transition and moving foam.</p></div><div class="updateItem"><b>V8.1 — Living Ocean</b><small>Previous</small><p>Ocean animation moved to real elapsed frame time with traveling wave bands and tidal surf.</p></div><div class="updateItem"><b>V8 — Premium Painted World</b><small>Previous</small><p>The surface renderer moved to continuous height/moisture sampling with smoothed terrain, mixed forests and upgraded miniature people and wildlife.</p></div><div class="updateItem"><b>V7.2 — Painted World Pass</b><small>Previous</small><p>Added larger painterly land dabs, softer shore blending, stronger surf and more organic forest shapes.</p></div><div class="updateItem"><b>V7.1 — Brushed World Pass</b><small>Previous</small><p>Terrain leans harder into a brushed look with stronger painterly dabs, forests render more organically, and water has much more visible motion and shoreline surf.</p></div><div class="updateItem"><b>V7 — Premium Art Pass</b><small>Previous</small><p>The world now uses a richer painterly land overlay, softer coastal blending, more alive shore water, refined huts and farms, and upgraded tiny sprites so citizens and animals feel like miniature living beings in a premium-looking world.</p></div><div class="updateItem"><b>V6.6 — Organic Terrain + Sprite Overhaul</b><small>Previous</small><p>Coastlines became softer, shoreline water gained a light tide effect, wave motion became more visible, and both citizens and animals received upgraded tiny vector sprites.</p></div><div class="updateItem"><b>V6.5 — Grand Graphics Overhaul</b><small>Previous</small><p>The world surface was rebuilt with sharper texturing, richer biome color, animated wave motion, improved shoreline foam, bush-like food clusters, cleaner low-zoom forest rendering and stronger visual grounding between the land and the citizens.</p></div><div class="updateItem"><b>V6 — Living Civilization</b><small>Previous</small><p>Citizens age, learn, build skills, form households, create families, experience grief and leave a lineage behind.</p></div><div class="updateItem"><b>V5.4 — World Scale</b><small>Previous</small><p>Dynamic 100×100 through 500×500 world sizes.</p></div><div class="updateItem"><b>V5.3 — Family & Marriage</b><small>Previous</small><p>Dating, emotional bonds, marriage, shared surnames, breakups and child surname inheritance.</p></div><div class="updateItem"><b>V5.2 — Responsive World</b><small>Previous</small><p>Responsive landscape catalogs, smaller wording and procedural unique names.</p></div><div class="updateItem"><b>V5.1 — Living World</b><small>Previous</small><p>Compact HUD, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs and relationships.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
   <div class="updateItem"><b>V4.1 — Underground</b><small>Previous</small><p>Surface/Underground toggle, caves, deep stone, underground lakes, magma, iron/gold/coal/crystal veins, mine entrances, tunneling miners and layer-aware god powers.</p></div>
@@ -2728,10 +2735,10 @@ function chooseTool(id){tool=id;const under=["cave","ustone","uwater","magma","u
 
 function centerOnSettlement(){const s=settlementById(selectedSettlementId)||settlement;camX=s.x;camY=s.y;clampCamera();showToast(`Centered on ${s.name}`)}
 
-canvas.addEventListener("pointerdown",e=>{canvas.setPointerCapture(e.pointerId);pointers.set(e.pointerId,canvasPoint(e));if(pointers.size===1){const p=canvasPoint(e);last=p;dragging=false;const w=screenToWorld(p.x,p.y);if(tool!=="inspect")applyTool(w.x,w.y,true)}else if(pointers.size===2){const a=[...pointers.values()];pinchStart={d:Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y),z:zoom}}});
-canvas.addEventListener("pointermove",e=>{const p=canvasPoint(e);if(pointers.has(e.pointerId))pointers.set(e.pointerId,p);if(pointers.size===2&&pinchStart){const a=[...pointers.values()],d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);zoom=clamp(pinchStart.z*(d/pinchStart.d),2,10);clampCamera();return}if(!pointers.has(e.pointerId)||pointers.size!==1)return;const dx=p.x-last.x,dy=p.y-last.y;if(Math.abs(dx)+Math.abs(dy)>2)dragging=true;if(tool==="inspect"){const s=cameraScale();camX-=dx/s;camY-=dy/s;clampCamera()}else if(Date.now()-paintStamp>24){const w=screenToWorld(p.x,p.y);applyTool(w.x,w.y,true);paintStamp=Date.now()}last=p});
-canvas.addEventListener("pointerup",e=>{const p=canvasPoint(e),w=screenToWorld(p.x,p.y);if(pointers.size===1){if(tool==="inspect"&&!dragging)applyTool(w.x,w.y,false);else if(tool!=="inspect")applyTool(w.x,w.y,false)}pointers.delete(e.pointerId);pinchStart=null});
-canvas.addEventListener("pointercancel",e=>{pointers.delete(e.pointerId);pinchStart=null});
+canvas.addEventListener("pointerdown",e=>{canvas.setPointerCapture(e.pointerId);pointers.set(e.pointerId,canvasPoint(e));if(pointers.size===1){const p=canvasPoint(e);last=p;dragging=false;const w=screenToWorld(p.x,p.y);lastPaintWorld=w;currentPaintStroke=(currentPaintStroke+1)&65535;if(tool!=="inspect"){applyTool(w.x,w.y,true);paintStamp=Date.now()}}else if(pointers.size===2){const a=[...pointers.values()];pinchStart={d:Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y),z:zoom}}});
+canvas.addEventListener("pointermove",e=>{const p=canvasPoint(e);if(pointers.has(e.pointerId))pointers.set(e.pointerId,p);if(pointers.size===2&&pinchStart){const a=[...pointers.values()],d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);zoom=clamp(pinchStart.z*(d/pinchStart.d),2,10);clampCamera();return}if(!pointers.has(e.pointerId)||pointers.size!==1)return;const dx=p.x-last.x,dy=p.y-last.y;if(Math.abs(dx)+Math.abs(dy)>2)dragging=true;if(tool==="inspect"){const s=cameraScale();camX-=dx/s;camY-=dy/s;clampCamera()}else{const now=Date.now();if(now-paintStamp>=brushPaintInterval()){const w=screenToWorld(p.x,p.y);if(shouldPaintAt(w)){applyTool(w.x,w.y,true);lastPaintWorld=w;paintStamp=now}}}last=p});
+canvas.addEventListener("pointerup",e=>{const p=canvasPoint(e),w=screenToWorld(p.x,p.y);if(pointers.size===1){if(tool==="inspect"&&!dragging)applyTool(w.x,w.y,false);else if(tool!=="inspect")applyTool(w.x,w.y,false)}pointers.delete(e.pointerId);pinchStart=null;lastPaintWorld=null});
+canvas.addEventListener("pointercancel",e=>{pointers.delete(e.pointerId);pinchStart=null;lastPaintWorld=null});
 
 document.querySelectorAll(".brush").forEach(b=>b.addEventListener("click",()=>{brush=Number(b.dataset.size);brushLabel.textContent=brush;document.querySelectorAll(".brush").forEach(x=>x.classList.toggle("active",x===b));brushPanel.classList.add("hidden");updateUI()}));
 brushBtn.addEventListener("click",()=>brushPanel.classList.toggle("hidden"));

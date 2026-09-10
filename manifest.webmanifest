@@ -1,7 +1,7 @@
 {
   "name": "Tiny World",
   "short_name": "Tiny World",
-  "description": "Tiny World V10.0.1 Performance Core: cached AI searches, indexed world data, staggered systems, adaptive rendering, visible-entity culling, throttled UI and lower mobile memory use.",
+  "description": "Tiny World V10.0.2 speeds up tree/resource spawning by eliminating unnecessary terrain rebuilds, caching tree art, and throttling brush stamps.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
