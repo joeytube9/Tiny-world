@@ -45,13 +45,18 @@ const familyStart=["Oak","River","Stone","Green","Ash","Moon","Dawn","Vale","Hil
 const familyEnd=["born","brook","crest","field","ford","grove","hall","hart","mere","ridge","root","run","stead","stone","vale","ward","wood","fall","reach","song"];
 const usedNames=new Set(),usedFirstNames=new Set();
 const techNames=["Shelter","Storage","Agriculture","Stoneworking","Mining","Village Planning","Granaries","Roads"];
+const settlementNameA=["Oak","River","Stone","Green","Dawn","Vale","High","Low","Bright","North","South","Mist","Sun","Star","Pine","Grey","Wild","Red","Moon","Ash","Iron","Gold"];
+const settlementNameB=["haven","ford","mere","fall","reach","stead","watch","brook","vale","crest","field","grove","rest","wick","gate","hold","run","ridge","harbor","hearth"];
+const kingdomWords=["Crown","Realm","Kingdom","Union","Dominion","League","Confederacy"];
+const civIdentities=["Agrarian","Mercantile","Expansionist","Peaceful","Traditional","Scholarly","Militaristic","Explorer"];
+const polityColors=["#d96b5f","#6c9dd8","#d6b25d","#73b26b","#a678cf","#d482b4","#65b6ae","#c98255","#91a95e","#8b9ee6"];
 
-let people=[],buildings=[],events=[],particles=[],clouds=[],constructionQueue=[],critters=[],visualEffects=[];
-let settlement=null,day=1,tick=0,paused=false,speed=1,tool="inspect",brush=12,selected=null,dirty=true,worldSeed=1,visualTime=0;
+let people=[],buildings=[],events=[],particles=[],clouds=[],constructionQueue=[],critters=[],visualEffects=[],settlements=[],kingdoms=[],wars=[],tradeRoutes=[];
+let settlement=null,day=1,tick=0,paused=false,speed=1,tool="inspect",brush=12,selected=null,dirty=true,worldSeed=1,visualTime=0,selectedSettlementId=1,nextSettlementId=1,nextKingdomId=1,nextWarId=1;
 let camX=WORLD_W/2,camY=WORLD_H/2,zoom=4,displayScale=1,pointers=new Map(),dragging=false,last={x:0,y:0},pinchStart=null,paintStamp=0,lastSim=0,toastTimer=null,nextPersonId=1,nextBuildingId=1,nextCritterId=1;
 let mainTab="world",worldSection="overview",newWorldArmed=false,resetWorldArmed=false;
 let activeLayer="surface",resourceLayer="surface",undergroundDirty=true;
-const defaultWorldConfig={seed:"random",worldSize:200,landmass:50,water:50,forest:52,mountains:42,wildlife:50,startPopulation:2,startingFood:12,startingWood:4};
+const defaultWorldConfig={seed:"random",worldSize:200,landmass:50,water:50,forest:52,mountains:42,wildlife:50,startPopulation:6,startingFood:18,startingWood:8};
 let worldConfig=Object.assign({},defaultWorldConfig);
 let lastGeneratedConfig=Object.assign({},defaultWorldConfig);
 let settings={labels:true,trails:true,dayNight:true,effects:true};try{settings=Object.assign(settings,JSON.parse(localStorage.getItem("tinyWorldSettings")||"{}"))}catch(e){}try{worldConfig=Object.assign(worldConfig,JSON.parse(localStorage.getItem("tinyWorldConfig")||"{}"))}catch(e){}
@@ -183,7 +188,7 @@ function normalizeWorldConfig(cfg){
   c.forest=clamp(Number(c.forest)||50,0,100);
   c.mountains=clamp(Number(c.mountains)||40,0,100);
   c.wildlife=clamp(Number(c.wildlife)||50,0,100);
-  c.startPopulation=clamp(Math.round(Number(c.startPopulation)||2),2,12);
+  c.startPopulation=clamp(Math.round(Number(c.startPopulation)||6),2,20);
   c.startingFood=clamp(Math.round(Number(c.startingFood)||12),0,60);
   c.startingWood=clamp(Math.round(Number(c.startingWood)||4),0,40);
   c.seed=String(c.seed??"random");
@@ -191,7 +196,7 @@ function normalizeWorldConfig(cfg){
 }
 function populationCapForWorld(){
   const s=configValue("worldSize");
-  return s<=100?36:s<=150?44:s<=200?56:s<=300?90:150
+  return s<=100?80:s<=150?120:s<=200?180:s<=300?300:450
 }
 function worldAreaLabel(){return `${WORLD_W}×${WORLD_H}`}
 function resetCurrentWorld(){
@@ -201,9 +206,337 @@ function resetCurrentWorld(){
 function showToast(text){clearTimeout(toastTimer);toast.textContent=text;toast.classList.remove("hidden");toastTimer=setTimeout(()=>toast.classList.add("hidden"),1350)}
 function addEvent(text,kind="world"){events.unshift({day:Math.floor(day),text,kind});events=events.slice(0,160);renderHistory()}
 function renderHistory(){historyList.innerHTML=events.map(e=>`<div class="event"><div class="eday">DAY ${e.day}</div><div class="etext">${escapeHtml(e.text)}</div></div>`).join("")}
-function discover(name,text){if(settlement.tech.has(name))return;settlement.tech.add(name);addEvent(text||`${settlement.name} discovered ${name}.`,"discovery");showToast(`Discovery: ${name}`)}
-function hasTech(name){return settlement.tech.has(name)}
+function discover(name,text,s=settlement){
+  if(!s||s.tech.has(name))return;s.tech.add(name);
+  addEvent(text||`${s.name} discovered ${name}.`,"discovery");
+  if(s===settlement)showToast(`Discovery: ${name}`)
+}
+function hasTech(name,s=settlement){return !!s&&s.tech.has(name)}
 
+
+function settlementById(id){return settlements.find(s=>s.id===Number(id))||null}
+function kingdomById(id){return kingdoms.find(k=>k.id===Number(id))||null}
+function citizenSettlement(p){return settlementById(p?.settlementId)||settlement}
+function settlementPeople(s,aliveOnly=true){return people.filter(p=>(!aliveOnly||p.alive)&&p.settlementId===s.id)}
+function settlementBuildings(s,completeOnly=false){return buildings.filter(b=>(!completeOnly||b.complete)&&b.settlementId===s.id)}
+function settlementPopulation(s){return settlementPeople(s,true).length}
+function settlementRadius(s){
+  const pop=settlementPopulation(s),built=settlementBuildings(s,true).length;
+  s.territoryRadius=clamp(7+Math.sqrt(Math.max(1,pop))*2.4+built*.42,8,32);
+  return s.territoryRadius
+}
+function uniqueSettlementName(){
+  const used=new Set(settlements.map(s=>s.name));
+  for(let n=0;n<80;n++){
+    const name=settlementNameA[rndi(0,settlementNameA.length-1)]+settlementNameB[rndi(0,settlementNameB.length-1)];
+    if(!used.has(name))return name
+  }
+  return `Hearth ${settlements.length+1}`
+}
+function settlementIdentity(founders=[]){
+  if(!founders.length)return civIdentities[rndi(0,civIdentities.length-1)];
+  const avg=k=>founders.reduce((a,p)=>a+(p.traits?.[k]||.5),0)/founders.length;
+  if(avg("bravery")>.69)return "Militaristic";
+  if(avg("curiosity")>.70)return "Explorer";
+  if(avg("work")>.71)return "Agrarian";
+  if(avg("social")>.70)return "Mercantile";
+  if(avg("kindness")>.72)return "Peaceful";
+  return civIdentities[rndi(0,civIdentities.length-1)]
+}
+function createSettlement(name,x,y,founders=[],parentId=null){
+  const s={
+    id:nextSettlementId++,name:name||uniqueSettlementName(),x:Math.round(x),y:Math.round(y),
+    food:Math.max(8,founders.length*4),wood:8,stone:0,iron:0,gold:0,coal:0,
+    tech:new Set(parentId?(settlementById(parentId)?.tech||[]):[]),births:0,deaths:0,
+    foundedDay:Math.floor(day),parentId,leaderId:null,kingdomId:null,
+    identity:settlementIdentity(founders),culture:`${surnameOf(founders[0])||"Hearth"} tradition`,
+    colorIndex:(nextSettlementId-2)%polityColors.length,territoryRadius:9,
+    relations:{},lastExpansionDay:day,lastTradeDay:day,lastElectionDay:day,
+    prosperity:50,warWeariness:0
+  };
+  settlements.push(s);
+  for(const p of founders){
+    const old=citizenSettlement(p);
+    p.citizenshipHistory=p.citizenshipHistory||[];
+    if(old&&old.id!==s.id)p.citizenshipHistory.unshift(`${old.name} → ${s.name}`);
+    p.settlementId=s.id;p.homeId=null;p.refugee=false
+  }
+  chooseLeader(s,true);
+  return s
+}
+function leaderScore(p){
+  return (p.reputation||0)*1.4+(p.traits?.social||.5)*25+(p.traits?.bravery||.5)*18+(p.education||0)*.22+Math.min(p.age,60)*.18+(p.wealth||0)*.08
+}
+function chooseLeader(s,silent=false){
+  const candidates=settlementPeople(s,true).filter(p=>p.age>=18&&p.layer!=="underground").sort((a,b)=>leaderScore(b)-leaderScore(a));
+  const old=s.leaderId,newLeader=candidates[0]||null;
+  s.leaderId=newLeader?.id||null;s.lastElectionDay=day;
+  if(newLeader){
+    newLeader.reputation=clamp((newLeader.reputation||0)+4,0,100);
+    newLeader.militaryRole=null;
+    if(!silent&&old!==newLeader.id){
+      const oldP=people.find(p=>p.id===old);
+      addEvent(`${newLeader.name} became leader of ${s.name}${oldP?`, succeeding ${oldP.name}`:""}.`,"politics");
+      memoryAdd(newLeader,`Became leader of ${s.name}`)
+    }
+  }
+  return newLeader
+}
+function settlementLeader(s){return s?people.find(p=>p.id===s.leaderId&&p.alive)||null:null}
+function relationScore(a,b){return Number(a?.relations?.[b?.id]??0)}
+function setRelation(a,b,v){
+  if(!a||!b||a.id===b.id)return;
+  a.relations[b.id]=clamp(v,-100,100);b.relations[a.id]=clamp(v,-100,100)
+}
+function changeDiplomacy(a,b,v){setRelation(a,b,relationScore(a,b)+v)}
+function relationLabel(v){
+  return v>=65?"Allied":v>=30?"Friendly":v>=8?"Cordial":v>-18?"Neutral":v>-45?"Tense":"Hostile"
+}
+function kingdomNameFor(s){
+  const leader=settlementLeader(s),root=leader?surnameOf(leader):s.name;
+  return `${root} ${kingdomWords[rndi(0,kingdomWords.length-1)]}`
+}
+function createKingdom(capital,members=[capital]){
+  const k={
+    id:nextKingdomId++,name:kingdomNameFor(capital),capitalId:capital.id,
+    foundedDay:Math.floor(day),memberIds:[],rulerId:capital.leaderId,
+    treasury:Math.floor(capital.gold||0),colorIndex:capital.colorIndex,
+    laws:["Protect settlements","Honor trade"],warsWon:0,warsLost:0
+  };
+  kingdoms.push(k);
+  for(const s of members){s.kingdomId=k.id;if(!k.memberIds.includes(s.id))k.memberIds.push(s.id)}
+  const ruler=settlementLeader(capital);
+  if(ruler)memoryAdd(ruler,`Founded ${k.name}`);
+  addEvent(`${capital.name} proclaimed the ${k.name}${ruler?` under ${ruler.name}`:""}.`,"kingdom");
+  return k
+}
+function settlementKingdom(s){return s?.kingdomId?kingdomById(s.kingdomId):null}
+function kingdomRuler(k){if(!k)return null;return people.find(p=>p.id===k.rulerId&&p.alive)||settlementLeader(settlementById(k.capitalId))}
+function militaryStrength(s){
+  const adults=settlementPeople(s,true).filter(p=>p.age>=16&&p.age<70);
+  const courage=adults.reduce((a,p)=>a+(p.traits?.bravery||.5),0);
+  return Math.round(adults.length*2.2+courage*1.4+(s.iron||0)*.9+(s.gold||0)*.08)
+}
+function armyMembers(s){
+  const atWar=wars.some(w=>w.status==="active"&&(w.aId===s.id||w.bId===s.id));
+  const adults=settlementPeople(s,true).filter(p=>p.age>=17&&p.age<65&&p.layer!=="underground")
+    .sort((a,b)=>(b.traits?.bravery||0)-(a.traits?.bravery||0));
+  const n=atWar?Math.max(1,Math.ceil(adults.length*.34)):Math.max(0,Math.floor(adults.length*.10));
+  const army=adults.slice(0,n);
+  for(const p of adults)p.militaryRole=army.includes(p)?"Militia":null;
+  return army
+}
+function maxSettlements(){
+  const n=configValue("worldSize");
+  return n<=100?3:n<=150?4:n<=200?6:n<=300?10:16
+}
+function validSettlementSite(x,y,origin){
+  if(!passable(x,y))return false;
+  if(terrain[idx(x,y)]===T.SAND)return false;
+  for(const s of settlements)if(Math.hypot(s.x-x,s.y-y)<Math.max(20,(settlementRadius(s)+10)))return false;
+  let land=0,water=0;
+  for(let yy=-7;yy<=7;yy+=2)for(let xx=-7;xx<=7;xx+=2){
+    const nx=x+xx,ny=y+yy;if(nx<1||ny<1||nx>=WORLD_W-1||ny>=WORLD_H-1)continue;
+    const t=terrain[idx(nx,ny)];if(passable(nx,ny))land++;if(isWaterTile(t))water++
+  }
+  return land>=26&&(origin?Math.hypot(origin.x-x,origin.y-y)>18:true)
+}
+function findExpansionSite(origin){
+  for(let n=0;n<500;n++){
+    const r=rnd(24,Math.min(75,Math.max(30,WORLD_W*.34))),a=rnd(0,Math.PI*2);
+    const x=clamp(Math.round(origin.x+Math.cos(a)*r),8,WORLD_W-9),y=clamp(Math.round(origin.y+Math.sin(a)*r),8,WORLD_H-9);
+    if(validSettlementSite(x,y,origin))return{x,y}
+  }
+  return null
+}
+function familyMigrationGroup(founder,s){
+  const ids=new Set([founder.id]);
+  if(founder.partner){
+    const p=people.find(q=>q.id===founder.partner&&q.alive&&q.settlementId===s.id);
+    if(p)ids.add(p.id)
+  }
+  for(const id of founder.children||[]){
+    const c=people.find(q=>q.id===id&&q.alive&&q.settlementId===s.id&&q.age<18);
+    if(c)ids.add(c.id)
+  }
+  return [...ids].map(id=>people.find(p=>p.id===id)).filter(Boolean).slice(0,5)
+}
+function attemptExpansion(){
+  if(settlements.length>=maxSettlements())return;
+  const candidates=settlements.filter(s=>settlementPopulation(s)>=8&&day-(s.lastExpansionDay||0)>18)
+    .sort((a,b)=>settlementPopulation(b)-settlementPopulation(a));
+  for(const s of candidates){
+    const adults=settlementPeople(s,true).filter(p=>p.age>=18&&p.age<55&&p.layer!=="underground")
+      .sort((a,b)=>((b.traits?.curiosity||.5)+(b.traits?.bravery||.5))-((a.traits?.curiosity||.5)+(a.traits?.bravery||.5)));
+    if(!adults.length)continue;
+    const founder=adults[0],group=familyMigrationGroup(founder,s);
+    if(group.length<2&&settlementPopulation(s)<12)continue;
+    const site=findExpansionSite(s);if(!site)continue;
+    s.lastExpansionDay=day;
+    const ns=createSettlement(uniqueSettlementName(),site.x,site.y,group,s.id);
+    ns.food=Math.max(10,group.length*4);ns.wood=10;
+    setRelation(s,ns,42+rndi(0,18));
+    for(const p of group){
+      p.x=site.x+rndi(-2,2);p.y=site.y+rndi(-2,2);p.px=p.x;p.py=p.y;p.goal=`Found ${ns.name}`;
+      memoryAdd(p,`Migrated from ${s.name} to found ${ns.name}`)
+    }
+    addBuilding("firepit",site.x,site.y,true,ns.id);
+    addBuilding("hut",site.x+2,site.y,true,ns.id);
+    addEvent(`${founder.name} led ${group.length} settlers from ${s.name} and founded ${ns.name}.`,"migration");
+    showToast(`${ns.name} founded`);
+    assignHomes();assignJobs();
+    break
+  }
+}
+function tradeRouteBetween(a,b){return tradeRoutes.find(r=>(r.aId===a.id&&r.bId===b.id)||(r.aId===b.id&&r.bId===a.id))}
+function updateTrade(){
+  for(let i=0;i<settlements.length;i++)for(let j=i+1;j<settlements.length;j++){
+    const a=settlements[i],b=settlements[j],rel=relationScore(a,b),dist=Math.hypot(a.x-b.x,a.y-b.y);
+    let route=tradeRouteBetween(a,b);
+    if(rel>20&&dist<Math.min(150,WORLD_W*.65)&&!route){
+      route={aId:a.id,bId:b.id,createdDay:Math.floor(day),volume:1,lastTradeDay:day};tradeRoutes.push(route);
+      addEvent(`${a.name} and ${b.name} opened a trade route.`,"trade")
+    }
+    if(route&&rel<-30){tradeRoutes=tradeRoutes.filter(r=>r!==route);addEvent(`Trade between ${a.name} and ${b.name} collapsed.`,"trade");continue}
+    if(route&&day-route.lastTradeDay>4){
+      route.lastTradeDay=day;route.volume=clamp(route.volume+.15,1,20);
+      const rich=a.food>b.food?a:b,poor=rich===a?b:a;
+      const foodMove=Math.min(3,Math.max(0,Math.floor((rich.food-poor.food)/5)));
+      if(foodMove){rich.food-=foodMove;poor.food+=foodMove}
+      if((rich.wood||0)>(poor.wood||0)+5){rich.wood--;poor.wood++}
+      rich.gold=(rich.gold||0)+.08;poor.gold=Math.max(0,(poor.gold||0)-.02);
+      changeDiplomacy(a,b,.35)
+    }
+  }
+}
+function bordersOverlap(a,b){return Math.hypot(a.x-b.x,a.y-b.y)<(settlementRadius(a)+settlementRadius(b))*.92}
+function updateDiplomacy(){
+  for(let i=0;i<settlements.length;i++)for(let j=i+1;j<settlements.length;j++){
+    const a=settlements[i],b=settlements[j];
+    let delta=(Math.random()-.5)*1.15;
+    if(a.parentId===b.id||b.parentId===a.id)delta+=.18;
+    if(a.kingdomId&&a.kingdomId===b.kingdomId)delta+=.38;
+    if(tradeRouteBetween(a,b))delta+=.22;
+    if(bordersOverlap(a,b))delta-=.52;
+    if(a.identity==="Militaristic"||b.identity==="Militaristic")delta-=.10;
+    if(a.identity==="Peaceful"||b.identity==="Peaceful")delta+=.08;
+    changeDiplomacy(a,b,delta)
+  }
+}
+function maybeFormKingdoms(){
+  if(settlements.length<2)return;
+  // Existing kingdoms can peacefully absorb very close allies.
+  for(const k of kingdoms){
+    const capital=settlementById(k.capitalId);if(!capital)continue;
+    for(const s of settlements){
+      if(s.kingdomId||s.id===capital.id)continue;
+      if(relationScore(capital,s)>67&&Math.random()<.12){
+        s.kingdomId=k.id;k.memberIds.push(s.id);
+        addEvent(`${s.name} joined the ${k.name}.`,"kingdom")
+      }
+    }
+    const ruler=kingdomRuler(k);if(ruler)k.rulerId=ruler.id
+  }
+  if(kingdoms.length>=Math.max(1,Math.floor(settlements.length/2)))return;
+  const free=settlements.filter(s=>!s.kingdomId&&settlementPopulation(s)>=7);
+  for(const a of free){
+    const ally=free.find(b=>b.id!==a.id&&relationScore(a,b)>55);
+    if(ally&&Math.random()<.18){createKingdom(a,[a,ally]);break}
+  }
+}
+function activeWarBetween(a,b){return wars.find(w=>w.status==="active"&&((w.aId===a.id&&w.bId===b.id)||(w.aId===b.id&&w.bId===a.id)))}
+function startWar(a,b,cause="a border dispute"){
+  if(!a||!b||activeWarBetween(a,b))return null;
+  const w={id:nextWarId++,aId:a.id,bId:b.id,startDay:Math.floor(day),status:"active",cause,casualtiesA:0,casualtiesB:0,lastBattleDay:day,battles:0,winnerId:null};
+  wars.push(w);setRelation(a,b,-75);
+  a.warWeariness=0;b.warWeariness=0;
+  addEvent(`${a.name} and ${b.name} went to war over ${cause}.`,"war");
+  showToast(`${a.name} ⚔ ${b.name}`);
+  return w
+}
+function endWar(w,winner=null,reason="a negotiated peace"){
+  if(!w||w.status!=="active")return;
+  const a=settlementById(w.aId),b=settlementById(w.bId);
+  w.status="ended";w.endDay=Math.floor(day);w.winnerId=winner?.id||null;
+  if(a&&b)setRelation(a,b,-8+rndi(0,16));
+  if(winner){
+    const loser=winner.id===w.aId?b:a;
+    const wk=settlementKingdom(winner);
+    if(wk&&loser&&!loser.kingdomId&&Math.random()<.42){
+      loser.kingdomId=wk.id;if(!wk.memberIds.includes(loser.id))wk.memberIds.push(loser.id);
+      addEvent(`${loser.name} entered the ${wk.name} after defeat.`,"kingdom")
+    }
+    if(wk)wk.warsWon++;
+  }
+  addEvent(`${a?.name||"A settlement"} and ${b?.name||"another settlement"} ended their war${winner?`; ${winner.name} prevailed`:""} through ${reason}.`,"war")
+}
+function battleCasualty(s,w,side){
+  const army=armyMembers(s);if(!army.length)return false;
+  const p=army[rndi(0,army.length-1)];
+  handleDeath(p,`battle in the war between ${settlementById(w.aId)?.name||"rivals"} and ${settlementById(w.bId)?.name||"rivals"}`);
+  if(side==="a")w.casualtiesA++;else w.casualtiesB++;
+  return true
+}
+function updateWars(){
+  // New wars can emerge from prolonged hostility and border pressure.
+  for(let i=0;i<settlements.length;i++)for(let j=i+1;j<settlements.length;j++){
+    const a=settlements[i],b=settlements[j];
+    if(activeWarBetween(a,b)||(a.kingdomId&&a.kingdomId===b.kingdomId))continue;
+    if(relationScore(a,b)<-48&&settlementPopulation(a)>=4&&settlementPopulation(b)>=4&&Math.random()<.035){
+      startWar(a,b,bordersOverlap(a,b)?"disputed border land":"deepening rivalry")
+    }
+  }
+  for(const w of wars.filter(w=>w.status==="active")){
+    const a=settlementById(w.aId),b=settlementById(w.bId);if(!a||!b){w.status="ended";continue}
+    a.warWeariness=clamp((a.warWeariness||0)+.25,0,100);b.warWeariness=clamp((b.warWeariness||0)+.25,0,100);
+    if(day-w.lastBattleDay>3){
+      w.lastBattleDay=day;w.battles++;
+      const sa=militaryStrength(a)*rnd(.72,1.26),sb=militaryStrength(b)*rnd(.72,1.26);
+      if(sa>sb*1.12){battleCasualty(b,w,"b");changeDiplomacy(a,b,-2)}
+      else if(sb>sa*1.12){battleCasualty(a,w,"a");changeDiplomacy(a,b,-2)}
+      else if(Math.random()<.45){battleCasualty(Math.random()<.5?a:b,w,Math.random()<.5?"a":"b")}
+      addEvent(`A battle was fought between ${a.name} and ${b.name}.`,"battle")
+    }
+    const age=day-w.startDay,pa=settlementPopulation(a),pb=settlementPopulation(b);
+    if(pa<2||pb<2||age>55||(age>18&&Math.random()<.04)){
+      const sa=militaryStrength(a),sb=militaryStrength(b);
+      const winner=sa>sb*1.28?a:sb>sa*1.28?b:null;
+      endWar(w,winner,winner?"military victory":"a peace settlement")
+    }
+  }
+}
+function safeSettlementFor(s){
+  return settlements.filter(d=>d.id!==s.id&&relationScore(s,d)>10&&!wars.some(w=>w.status==="active"&&(w.aId===d.id||w.bId===d.id)))
+    .sort((a,b)=>relationScore(s,b)-relationScore(s,a))[0]||null
+}
+function updateRefugees(){
+  for(const s of settlements){
+    const war=wars.some(w=>w.status==="active"&&(w.aId===s.id||w.bId===s.id));
+    const famine=s.food<Math.max(2,settlementPopulation(s)*.30);
+    if((!war&&!famine)||settlementPopulation(s)<5||Math.random()>.12)continue;
+    const dest=safeSettlementFor(s);if(!dest)continue;
+    const candidate=settlementPeople(s,true).filter(p=>p.age>=14&&p.layer!=="underground").sort((a,b)=>(b.stress||0)-(a.stress||0))[0];
+    if(!candidate)continue;
+    const group=familyMigrationGroup(candidate,s).slice(0,4);
+    for(const p of group){
+      p.citizenshipHistory=p.citizenshipHistory||[];p.citizenshipHistory.unshift(`${s.name} → ${dest.name}`);
+      p.settlementId=dest.id;p.homeId=null;p.refugee=true;
+      p.x=dest.x+rndi(-3,3);p.y=dest.y+rndi(-3,3);p.px=p.x;p.py=p.y;
+      memoryAdd(p,`Fled ${s.name} for ${dest.name}`)
+    }
+    addEvent(`${group.length} people fled ${s.name} and sought refuge in ${dest.name}.`,"refugees");
+    assignHomes()
+  }
+}
+function updatePoliticalWorld(){
+  for(const s of settlements){
+    settlementRadius(s);
+    if(!settlementLeader(s)||day-(s.lastElectionDay||0)>28)chooseLeader(s);
+    const pop=settlementPopulation(s);
+    s.prosperity=clamp(45+(s.food-pop)*1.1+(s.wood||0)*.25+(s.gold||0)*.8-(s.warWeariness||0)*.35,0,100)
+  }
+  updateTrade();updateDiplomacy();maybeFormKingdoms();updateWars();updateRefugees()
+}
 function colorFor(t,x,y,i){
   const h=height[i],m=moisture[i],shore=shorelineFactor(x,y);
   const jitter=(hash(x,y,31)-.5)*10,detail=(hash(x,y,47)-.5)*8;
@@ -580,38 +913,23 @@ function householdMembers(p){
 }
 function homeFor(p){return p.homeId?buildings.find(b=>b.id===p.homeId&&b.complete):null}
 function assignHomes(){
-  const huts=buildingsOf("hut");
-  if(!huts.length){for(const p of people)p.homeId=null;return}
-  const capacity=new Map(huts.map(h=>[h.id,4]));
-  for(const p of people)if(p.homeId&&!capacity.has(p.homeId))p.homeId=null;
-
-  // Keep valid existing households first.
-  for(const p of people.filter(x=>x.alive&&x.homeId)){
-    if((capacity.get(p.homeId)||0)>0)capacity.set(p.homeId,capacity.get(p.homeId)-1);
-    else p.homeId=null
-  }
-
-  // Married/dating parents and children try to share a home.
-  const grouped=new Set();
-  for(const p of people.filter(x=>x.alive)){
-    if(grouped.has(p.id)||p.homeId)continue;
-    const partner=p.partner?people.find(q=>q.id===p.partner&&q.alive):null;
-    const kids=people.filter(q=>q.alive&&(q.parents||[]).includes(p.id)&&(partner?(q.parents||[]).includes(partner.id):true)&&q.age<18);
-    const family=[p,...(partner&&partner.id!==p.id?[partner]:[]),...kids].filter((q,i,a)=>a.findIndex(x=>x.id===q.id)===i&&!q.homeId);
-    let chosen=huts.find(h=>(capacity.get(h.id)||0)>=Math.min(4,family.length));
-    if(!chosen)chosen=huts.sort((a,b)=>(capacity.get(b.id)||0)-(capacity.get(a.id)||0))[0];
-    if(chosen){
+  for(const s of settlements.length?settlements:[settlement]){
+    if(!s)continue;
+    const residents=settlementPeople(s,true),huts=buildingsOf("hut",true,s.id);
+    const capacity=new Map(huts.map(h=>[h.id,4]));
+    for(const p of residents)if(p.homeId&&!capacity.has(p.homeId))p.homeId=null;
+    for(const p of residents.filter(x=>x.homeId)){
+      if((capacity.get(p.homeId)||0)>0)capacity.set(p.homeId,capacity.get(p.homeId)-1);else p.homeId=null
+    }
+    for(const p of residents.filter(x=>!x.homeId)){
+      const partner=p.partner?people.find(q=>q.id===p.partner&&q.alive&&q.settlementId===s.id):null;
+      const family=[p,...(partner?[partner]:[]),...residents.filter(q=>q.age<18&&(q.parents||[]).includes(p.id))].filter((q,i,a)=>a.findIndex(x=>x.id===q.id)===i&&!q.homeId);
+      const h=huts.find(q=>(capacity.get(q.id)||0)>0);if(!h)break;
       for(const q of family){
-        if((capacity.get(chosen.id)||0)<=0)break;
-        q.homeId=chosen.id;capacity.set(chosen.id,capacity.get(chosen.id)-1);grouped.add(q.id)
+        if((capacity.get(h.id)||0)<=0)break;
+        q.homeId=h.id;capacity.set(h.id,capacity.get(h.id)-1)
       }
     }
-  }
-
-  // Everyone else takes any free bed.
-  for(const p of people.filter(x=>x.alive&&!x.homeId)){
-    const h=huts.find(q=>(capacity.get(q.id)||0)>0);
-    if(h){p.homeId=h.id;capacity.set(h.id,capacity.get(h.id)-1)}
   }
 }
 function jobAffinity(p,job){
@@ -644,7 +962,7 @@ function choosePersonalGoal(p){
   if((p.wealth||0)<10&&(p.traits?.work||0)>.62)return "Build personal security";
   if((p.traits?.curiosity||0)>.74)return "Explore and understand the world";
   if(skillLevel(p,p.job)<65&&(p.traits?.work||0)>.58)return `Master ${p.job.toLowerCase()} work`;
-  return "Help First Hearth prosper"
+  return `Help ${citizenSettlement(p)?.name||"the settlement"} prosper`
 }
 function updateLifeStage(p){
   const stage=lifeStageFor(p.age);
@@ -706,7 +1024,7 @@ function updateEmotionalLife(p){
 function handleDeath(p,cause="natural causes"){
   if(!p||!p.alive)return;
   p.alive=false;p.causeOfDeath=cause;p.deathDay=Math.floor(day);
-  settlement.deaths++;
+  const deathSettlement=citizenSettlement(p);if(deathSettlement)deathSettlement.deaths++;
   const age=Math.floor(p.age);
   const partner=p.partner?people.find(q=>q.id===p.partner&&q.alive):null;
   if(partner){
@@ -762,7 +1080,8 @@ function makePerson(name,x,y,sex,age,parents=[]){
     mentorId:null,homeId:null,wealth:rnd(0,3),reputation:0,
     possessions:{tools:0,keepsakes:parents.length?1:0},
     skills:{Gatherer:rnd(0,age>=18?15:3),Woodcutter:rnd(0,age>=18?8:2),Builder:rnd(0,age>=18?8:2),Farmer:rnd(0,age>=18?7:2),Miner:rnd(0,age>=18?5:1),Hauler:rnd(0,age>=18?8:2)},
-    preferredJob:null,jobSince:day,careerChanges:0,bestFriendId:null,rivalId:null
+    preferredJob:null,jobSince:day,careerChanges:0,bestFriendId:null,rivalId:null,
+    settlementId:settlement?.id||1,originSettlementId:settlement?.id||1,citizenshipHistory:[],refugee:false,militaryRole:null
   };
   p.preferredJob=age>=14?skillJobs.slice().sort((a,b)=>jobAffinity(p,b)-jobAffinity(p,a))[0]:null;
   p.longGoal=choosePersonalGoal(p);
@@ -806,9 +1125,24 @@ function moveCritterToward(c,t){
   for(const q of opts)if(passable(q[0],q[1])){c.dir=q[0]>=c.x?1:-1;c.x=q[0];c.y=q[1];return}
 }
 
-function addBuilding(type,x,y,complete=true){const b={id:nextBuildingId++,type,x,y,complete,progress:complete?100:0,age:0,smoke:rnd(0,6.28),crop:0,harvest:0};buildings.push(b);return b}
-function buildingsOf(type,completeOnly=true){return buildings.filter(b=>b.type===type&&(!completeOnly||b.complete))}
-function nearestBuilding(p,type=null,completeOnly=true){let best=null,bd=1e9;for(const b of buildings){if(type&&b.type!==type)continue;if(completeOnly&&!b.complete)continue;const d=Math.abs(p.x-b.x)+Math.abs(p.y-b.y);if(d<bd){bd=d;best=b}}return best}
+function addBuilding(type,x,y,complete=true,settlementId=null){
+  const sid=settlementId??settlement?.id??1;
+  const b={id:nextBuildingId++,type,x,y,complete,progress:complete?100:0,age:0,smoke:rnd(0,6.28),crop:0,harvest:0,settlementId:sid};
+  buildings.push(b);return b
+}
+function buildingsOf(type,completeOnly=true,sid=null){
+  return buildings.filter(b=>b.type===type&&(!completeOnly||b.complete)&&(sid==null||b.settlementId===sid))
+}
+function nearestBuilding(p,type=null,completeOnly=true){
+  let best=null,bd=1e9;
+  for(const b of buildings){
+    if(type&&b.type!==type)continue;if(completeOnly&&!b.complete)continue;
+    if(p?.settlementId&&b.settlementId!==p.settlementId)continue;
+    const d=Math.abs(p.x-b.x)+Math.abs(p.y-b.y);
+    if(d<bd){bd=d;best=b}
+  }
+  return best
+}
 function dropoff(p){return nearestBuilding(p,"stockpile")||nearestBuilding(p,"firepit")||nearestBuilding(p,"hut")}
 function buildingAt(x,y,r=3){return buildings.some(b=>Math.hypot(b.x-x,b.y-y)<r)}
 function passable(x,y){if(x<1||y<1||x>=WORLD_W-1||y>=WORLD_H-1)return false;const t=terrain[idx(x,y)];return t!==T.DEEP&&t!==T.WATER&&t!==T.MOUNTAIN&&t!==T.SNOW&&t!==T.LAVA}
@@ -833,7 +1167,7 @@ function aiChooseLongGoal(p){
   if((t.work||0)>.72)return "Master a useful trade";
   if((t.social||0)>.72)return "Build strong relationships";
   if((t.kindness||0)>.72)return "Care for family and neighbors";
-  return "Help First Hearth prosper"
+  return `Help ${citizenSettlement(p)?.name||"the settlement"} prosper`
 }
 function aiDangerNear(p){
   let danger=0;
@@ -863,7 +1197,7 @@ function aiSocialize(p){
   let friend=null,bd=8;
   const romantic=p.partner?people.find(q=>q.id===p.partner&&q.alive&&q.layer!=="underground"):null;
   if(romantic&&Math.hypot(romantic.x-p.x,romantic.y-p.y)<10){friend=romantic;bd=Math.hypot(romantic.x-p.x,romantic.y-p.y)}
-  else for(const q of people){if(!q.alive||q.id===p.id||q.layer==="underground")continue;const d=Math.hypot(q.x-p.x,q.y-p.y);if(d<bd){bd=d;friend=q}}
+  else for(const q of people){if(!q.alive||q.id===p.id||q.layer==="underground"||q.settlementId!==p.settlementId)continue;const d=Math.hypot(q.x-p.x,q.y-p.y);if(d<bd){bd=d;friend=q}}
   if(!friend)return false;
   p.goal=`Talk with ${friend.name}`;
   if(bd>1.6){moveToward(p,friend);return true}
@@ -893,44 +1227,51 @@ function aiFlee(p){
 }
 
 function assignJobs(){
-  const adults=people.filter(p=>p.alive&&p.age>=14&&p.layer!=="underground");
-  if(!adults.length)return;
-  const pending=buildings.filter(b=>!b.complete),farms=buildingsOf("farm");
-  const desired={
-    Builder:pending.length?Math.max(1,Math.ceil(adults.length*.14)):0,
-    Farmer:hasTech("Agriculture")?Math.max(0,Math.min(farms.length*2,Math.ceil(adults.length*.25))):0,
-    Miner:hasTech("Stoneworking")&&(settlement.stone<14||(settlement.iron||0)<8||(settlement.gold||0)<3)?Math.max(1,Math.ceil(adults.length*.14)):0,
-    Woodcutter:settlement.wood<18?Math.max(1,Math.ceil(adults.length*.21)):Math.max(0,Math.ceil(adults.length*.10)),
-    Gatherer:settlement.food<20?Math.max(1,Math.ceil(adults.length*.26)):Math.max(1,Math.ceil(adults.length*.14)),
-    Hauler:Math.max(0,Math.ceil(adults.length*.10))
-  };
-  let slots=[];
-  for(const [job,n] of Object.entries(desired))for(let i=0;i<n;i++)slots.push(job);
-  while(slots.length<adults.length)slots.push(Math.random()<.55?"Gatherer":"Hauler");
-
-  const unassigned=[...adults];
-  while(slots.length&&unassigned.length){
-    let bestP=null,bestJob=null,bestScore=-999,bestPi=-1,bestSi=-1;
-    for(let pi=0;pi<unassigned.length;pi++){
-      const p=unassigned[pi];
-      for(let si=0;si<slots.length;si++){
-        const job=slots[si];
-        let score=jobAffinity(p,job);
-        if(day-(p.jobSince||0)<6&&p.job===job)score+=.18;
-        if(p.lifeStage==="Elder"&&(job==="Miner"||job==="Woodcutter"))score-=.25;
-        if(p.lifeStage==="Teen"&&(job==="Miner"||job==="Builder"))score-=.10;
+  const groups=settlements.length?settlements:[settlement];
+  for(const s of groups){
+    if(!s)continue;
+    const adults=settlementPeople(s,true).filter(p=>p.age>=14&&p.layer!=="underground");
+    if(!adults.length)continue;
+    const localBuildings=settlementBuildings(s,false),pending=localBuildings.filter(b=>!b.complete),farms=localBuildings.filter(b=>b.complete&&b.type==="farm");
+    const desired={
+      Builder:pending.length?Math.max(1,Math.ceil(adults.length*.14)):0,
+      Farmer:hasTech("Agriculture",s)?Math.max(0,Math.min(farms.length*2,Math.ceil(adults.length*.25))):0,
+      Miner:hasTech("Stoneworking",s)&&((s.stone||0)<14||(s.iron||0)<8)?Math.max(1,Math.ceil(adults.length*.14)):0,
+      Woodcutter:(s.wood||0)<18?Math.max(1,Math.ceil(adults.length*.20)):Math.max(0,Math.ceil(adults.length*.10)),
+      Gatherer:(s.food||0)<20?Math.max(1,Math.ceil(adults.length*.26)):Math.max(1,Math.ceil(adults.length*.14)),
+      Hauler:Math.max(0,Math.ceil(adults.length*.10))
+    };
+    let slots=[];for(const [job,n] of Object.entries(desired))for(let i=0;i<n;i++)slots.push(job);
+    while(slots.length<adults.length)slots.push(Math.random()<.55?"Gatherer":"Hauler");
+    const unassigned=[...adults];
+    while(slots.length&&unassigned.length){
+      let bestP=null,bestJob=null,bestScore=-999,bestPi=-1,bestSi=-1;
+      for(let pi=0;pi<unassigned.length;pi++)for(let si=0;si<slots.length;si++){
+        const p=unassigned[pi],job=slots[si];let score=jobAffinity(p,job);
+        if(day-(p.jobSince||0)<6&&p.job===job)score+=.18;if(p.militaryRole)score-=.10;
         if(score>bestScore){bestScore=score;bestP=p;bestJob=job;bestPi=pi;bestSi=si}
       }
+      if(!bestP)break;if(bestP.job!==bestJob)setCareer(bestP,bestJob,`Best fit for ${bestJob.toLowerCase()} work`);
+      unassigned.splice(bestPi,1);slots.splice(bestSi,1)
     }
-    if(!bestP)break;
-    if(bestP.job!==bestJob)setCareer(bestP,bestJob,`Best fit for ${bestJob.toLowerCase()} work`);
-    unassigned.splice(bestPi,1);slots.splice(bestSi,1)
   }
 }
-function deliver(p){if(p.layer==="underground")return false;const d=dropoff(p);if(!d)return false;if(!atTarget(p,d,1.8)){p.goal=`Deliver ${p.carryType}`;moveToward(p,d);return true}if(p.carryType==="food")settlement.food+=p.carryAmount;if(p.carryType==="wood")settlement.wood+=p.carryAmount;if(p.carryType==="stone")settlement.stone+=p.carryAmount;if(p.carryType==="iron")settlement.iron+=p.carryAmount;if(p.carryType==="gold")settlement.gold+=p.carryAmount;if(p.carryType==="coal")settlement.coal=(settlement.coal||0)+p.carryAmount;p.carryType=null;p.carryAmount=0;p.goal="Work";return true}
-function findFarmWork(p){const farms=buildingsOf("farm");if(!farms.length)return null;let best=null,bd=1e9;for(const f of farms){const d=Math.abs(p.x-f.x)+Math.abs(p.y-f.y);if(d<bd&&(f.crop>=100||f.crop<15)){bd=d;best=f}}return best||farms[rndi(0,farms.length-1)]}
+function deliver(p){
+  if(p.layer==="underground")return false;
+  const s=citizenSettlement(p),d=dropoff(p);if(!s||!d)return false;
+  if(!atTarget(p,d,1.8)){p.goal=`Deliver ${p.carryType}`;moveToward(p,d);return true}
+  if(p.carryType==="food")s.food+=p.carryAmount;if(p.carryType==="wood")s.wood+=p.carryAmount;
+  if(p.carryType==="stone")s.stone+=p.carryAmount;if(p.carryType==="iron")s.iron+=p.carryAmount;
+  if(p.carryType==="gold")s.gold+=p.carryAmount;if(p.carryType==="coal")s.coal=(s.coal||0)+p.carryAmount;
+  p.carryType=null;p.carryAmount=0;p.goal="Work";return true
+}
+function findFarmWork(p){
+  const farms=buildingsOf("farm",true,p.settlementId);if(!farms.length)return null;
+  let best=null,bd=1e9;for(const f of farms){const d=Math.abs(p.x-f.x)+Math.abs(p.y-f.y);if(d<bd&&(f.crop>=100||f.crop<15)){bd=d;best=f}}
+  return best||farms[rndi(0,farms.length-1)]
+}
 function workMinerUnderground(p){
-  const mine=buildingsOf("mine")[0];
+  const mine=buildingsOf("mine",true,p.settlementId)[0];
   if(!mine)return false;
   if(p.layer!=="underground"){
     if(p.carryAmount>0&&p.carryType)return deliver(p);
@@ -955,23 +1296,23 @@ function workMinerUnderground(p){
   else{uStone[i]=Math.max(0,uStone[i]-1);p.carryType="stone"}
   p.carryAmount=1+(Math.random()<skillLevel(p,"Miner")/170?1:0);gainSkill(p,"Miner",.15);rewardWork(p,.07);underground[i]=U.CAVE;undergroundDirty=true;spawnParticles("stone",p.x,p.y,5);return true
 }
-function workPerson(p){if(p.job==="Miner"&&buildingsOf("mine").length)return workMinerUnderground(p);if(p.carryAmount>0&&p.carryType)return deliver(p);
-  if(p.job==="Builder"){const site=buildings.find(b=>!b.complete);if(site){p.goal=`Build ${site.type}`;if(!atTarget(p,site,1.6)){moveToward(p,site);return true}site.progress+=1.35*workEfficiency(p,"Builder");gainSkill(p,"Builder",.10);rewardWork(p,.035);spawnParticles("dust",site.x,site.y,2);if(site.progress>=100){site.progress=100;site.complete=true;addEvent(`${p.name} completed the ${site.type}.`,"building");if(site.type==="hut"){discover("Shelter","The settlement mastered permanent shelter.");assignHomes()}if(site.type==="stockpile")discover("Storage","A communal stockpile established shared storage.");if(site.type==="farm")discover("Agriculture","The first fields were prepared for agriculture.");if(site.type==="granary")discover("Granaries","A granary was completed to protect the harvest.");if(site.type==="mine"){discover("Mining","First Hearth opened its first mine shaft.");openMineShaft(site)}}return true}}
+function workPerson(p){const s=citizenSettlement(p);if(!s)return false;if(p.job==="Miner"&&buildingsOf("mine",true,p.settlementId).length)return workMinerUnderground(p);if(p.carryAmount>0&&p.carryType)return deliver(p);
+  if(p.job==="Builder"){const site=buildings.find(b=>!b.complete&&b.settlementId===p.settlementId);if(site){p.goal=`Build ${site.type}`;if(!atTarget(p,site,1.6)){moveToward(p,site);return true}site.progress+=1.35*workEfficiency(p,"Builder");gainSkill(p,"Builder",.10);rewardWork(p,.035);spawnParticles("dust",site.x,site.y,2);if(site.progress>=100){site.progress=100;site.complete=true;addEvent(`${p.name} completed the ${site.type}.`,"building");if(site.type==="hut"){discover("Shelter",`${s.name} mastered permanent shelter.`,s);assignHomes()}if(site.type==="stockpile")discover("Storage",`${s.name} established shared storage.`,s);if(site.type==="farm")discover("Agriculture",`${s.name} prepared its first permanent fields.`,s);if(site.type==="granary")discover("Granaries",`${s.name} completed a granary to protect its harvest.`,s);if(site.type==="mine"){discover("Mining",`${s.name} opened its first mine shaft.`,s);openMineShaft(site)}}return true}}
   if(p.job==="Farmer"){const f=findFarmWork(p);if(f){p.goal="Tend fields";if(!atTarget(p,f,2)){moveToward(p,f);return true}if(f.crop>=100){p.carryType="food";p.carryAmount=5+Math.floor(skillLevel(p,"Farmer")/35);f.crop=8;gainSkill(p,"Farmer",.18);rewardWork(p,.06);spawnParticles("grain",f.x,f.y,8);return true}if(f.crop<15)f.crop=18;gainSkill(p,"Farmer",.035);return true}}
   if(p.job==="Miner"){const target=nearestTile(p,(i)=>rocks[i]>0||iron[i]>0||gold[i]>0,34);if(target){p.goal="Mine minerals";if(!atTarget(p,target,1)){moveToward(p,target);return true}const i=idx(target.x,target.y);if(gold[i]>0){gold[i]--;p.carryType="gold"}else if(iron[i]>0){iron[i]--;p.carryType="iron"}else{rocks[i]--;p.carryType="stone"}p.carryAmount=1+(Math.random()<skillLevel(p,"Miner")/180?1:0);gainSkill(p,"Miner",.14);rewardWork(p,.06);spawnParticles("stone",p.x,p.y,5);return true}}
   if(p.job==="Woodcutter"){const target=nearestTile(p,(i)=>trees[i]>0,34);if(target){p.goal="Cut wood";if(!atTarget(p,target,1)){moveToward(p,target);return true}const i=idx(target.x,target.y);trees[i]--;p.carryType="wood";p.carryAmount=1+(Math.random()<skillLevel(p,"Woodcutter")/150?1:0);gainSkill(p,"Woodcutter",.13);rewardWork(p,.045);spawnParticles("leaf",p.x,p.y,6);return true}}
-  if(p.job==="Hauler"){const f=buildingsOf("farm").find(f=>f.crop>=100);if(f){p.goal="Collect harvest";if(!atTarget(p,f,2)){moveToward(p,f);return true}p.carryType="food";p.carryAmount=4+Math.floor(skillLevel(p,"Hauler")/45);f.crop=12;gainSkill(p,"Hauler",.10);rewardWork(p,.04);return true}}
+  if(p.job==="Hauler"){const f=buildingsOf("farm",true,p.settlementId).find(f=>f.crop>=100);if(f){p.goal="Collect harvest";if(!atTarget(p,f,2)){moveToward(p,f);return true}p.carryType="food";p.carryAmount=4+Math.floor(skillLevel(p,"Hauler")/45);f.crop=12;gainSkill(p,"Hauler",.10);rewardWork(p,.04);return true}}
   const target=nearestTile(p,(i)=>food[i]>0,34);if(target){p.goal="Gather food";if(!atTarget(p,target,1)){moveToward(p,target);return true}const i=idx(target.x,target.y);food[i]--;p.carryType="food";p.carryAmount=2+(Math.random()<skillLevel(p,"Gatherer")/160?1:0);gainSkill(p,"Gatherer",.11);rewardWork(p,.035);return true}
   wander(p);return true;
 }
-function homeCapacity(){return buildingsOf("hut").length*4+2}
+function homeCapacity(s=settlement){return s?buildingsOf("hut",true,s.id).length*4+2:2}
 function matchPartners(){
   const singles=people.filter(p=>p.alive&&p.age>=18&&!p.partner&&p.layer!=="underground"&&day-(p.lastBreakupDay||-999)>7);
   for(const p of singles){
     if(p.partner)continue;
     let best=null,bestScore=.55;
     for(const q of singles){
-      if(q===p||q.partner||q.sex===p.sex||Math.abs(q.age-p.age)>18||isCloseKin(p,q))continue;
+      if(q===p||q.partner||q.sex===p.sex||q.settlementId!==p.settlementId||Math.abs(q.age-p.age)>18||isCloseKin(p,q))continue;
       const dist=Math.hypot(q.x-p.x,q.y-p.y);
       if(dist>22)continue;
       const score=compatibilityScore(p,q)+relationValue(p,q.id)/220+relationValue(q,p.id)/220-dist/170;
@@ -1039,46 +1380,27 @@ function updateRelationships(){
 }
 function tryBirths(){
   if(people.filter(p=>p.alive).length>=populationCapForWorld())return;
-  if(homeCapacity()<=people.filter(p=>p.alive).length)return;
-  if(settlement.food<12)return;
   for(const mother of people){
     if(!mother.alive||mother.sex!=="F"||mother.age<18||mother.age>42||!mother.partner||day-mother.lastBirthDay<22)continue;
-    const father=people.find(p=>p.id===mother.partner&&p.alive);
+    const s=citizenSettlement(mother);if(!s||homeCapacity(s)<=settlementPopulation(s)||s.food<12)continue;
+    const father=people.find(p=>p.id===mother.partner&&p.alive&&p.settlementId===mother.settlementId);
     if(!father||father.partner!==mother.id)continue;
-
-    const bond=relationshipBond(mother,father);
-    const baseChance=mother.relationshipStage==="married"?.011:.0065;
-    const birthChance=baseChance*clamp((bond+100)/150,.30,1.35);
-    if(Math.random()>birthChance)continue;
-
+    const bond=relationshipBond(mother,father),baseChance=mother.relationshipStage==="married"?.011:.0065;
+    if(Math.random()>baseChance*clamp((bond+100)/150,.30,1.35))continue;
     let childSurname,chosenBy=null;
-    if(mother.relationshipStage==="married"&&father.relationshipStage==="married"&&surnameOf(mother)===surnameOf(father)){
-      childSurname=surnameOf(mother)
-    }else{
-      const choice=chooseUnmarriedChildSurname(mother,father);
-      childSurname=choice.surname;chosenBy=choice.chooser
-    }
-
+    if(mother.relationshipStage==="married"&&father.relationshipStage==="married"&&surnameOf(mother)===surnameOf(father))childSurname=surnameOf(mother);
+    else{const choice=chooseUnmarriedChildSurname(mother,father);childSurname=choice.surname;chosenBy=choice.chooser}
     const sex=Math.random()<.5?"F":"M",name=generateUniqueName(null,childSurname);
-    const baby=makePerson(name,mother.x,mother.y,sex,0,[mother.id,father.id]);
-    for(const k of ["bravery","work","social","curiosity","kindness"]){
-      baby.traits[k]=clamp(((mother.traits?.[k]||.5)+(father.traits?.[k]||.5))/2+rnd(-.13,.13),.12,.95)
-    }
-    baby.lifespan=clamp((mother.lifespan+father.lifespan)/2+rnd(-8,8),62,98);
-    baby.education=0;baby.longGoal="Grow up safely";
-    mother.children.push(baby.id);father.children.push(baby.id);
-    mother.lastBirthDay=day;
-    settlement.food=Math.max(0,settlement.food-6);
-    people.push(baby);settlement.births++;
-    memoryAdd(mother,`Gave birth to ${name}`);
-    memoryAdd(father,`Became parent of ${name}`);
+    const baby=makePerson(name,mother.x,mother.y,sex,0,[mother.id,father.id]);baby.settlementId=s.id;baby.originSettlementId=s.id;
+    for(const k of ["bravery","work","social","curiosity","kindness"])baby.traits[k]=clamp(((mother.traits?.[k]||.5)+(father.traits?.[k]||.5))/2+rnd(-.13,.13),.12,.95);
+    baby.lifespan=clamp((mother.lifespan+father.lifespan)/2+rnd(-8,8),62,98);baby.education=0;baby.longGoal="Grow up safely";
+    mother.children.push(baby.id);father.children.push(baby.id);mother.lastBirthDay=day;s.food=Math.max(0,s.food-6);people.push(baby);s.births++;
+    memoryAdd(mother,`Gave birth to ${name} in ${s.name}`);memoryAdd(father,`Became parent of ${name}`);
     if(chosenBy)memoryAdd(chosenBy,`Chose the ${childSurname} surname for ${firstNameOf(baby)}`);
-    addEvent(`${name} was born to ${mother.name} and ${father.name}${chosenBy?`; ${chosenBy.name} chose the ${childSurname} family name`:""}.`,"family");
-    showToast(`${name} was born`);
-    break
+    addEvent(`${name} was born in ${s.name} to ${mother.name} and ${father.name}.`,"family");break
   }
 }
-function eatFromStores(p){if(p.hunger<58)return false;if(settlement.food>0){settlement.food--;p.hunger=clamp(p.hunger-36,0,100);p.goal="Eat";return true}return false}
+function eatFromStores(p){if(p.hunger<58)return false;const s=citizenSettlement(p);if(s&&s.food>0){s.food--;p.hunger=clamp(p.hunger-36,0,100);p.goal="Eat";return true}return false}
 function think(p){if(!p.alive)return;p.px+=(p.x-p.px)*.23;p.py+=(p.y-p.py)*.23;p.phase+=.22;p.hunger+=p.age<6?.020:.030;p.thirst+=.043;p.energy-=p.age<6?.010:.016;p.age+=.00011;if(!updateAging(p))return;aiUpdateMind(p);
   const pi=idx(clamp(Math.round(p.x),0,WORLD_W-1),clamp(Math.round(p.y),0,WORLD_H-1));if(p.layer!=="underground"){if(terrain[pi]===T.LAVA)p.health-=1.6;else if(burn[pi]>110)p.health-=.30}else if(underground[pi]===U.MAGMA)p.health-=1.8;if(p.hunger>92||p.thirst>94)p.health-=.09;else if(p.health<100&&p.hunger<55&&p.thirst<55)p.health+=.014;if(p.health<=0){const cause=p.hunger>92?"starvation":p.thirst>94?"dehydration":terrain[pi]===T.LAVA||underground[pi]===U.MAGMA?"burns":"injury";handleDeath(p,cause);return}
   if(aiFlee(p))return;
@@ -1092,23 +1414,49 @@ function think(p){if(!p.alive)return;p.px+=(p.x-p.px)*.23;p.py+=(p.y-p.py)*.23;p
   p.mood=p.stress>65?"Stressed":"Focused";workPerson(p);
 }
 
-function findBuildSite(type){const cx=settlement.x,cy=settlement.y;for(let r=4;r<24;r+=2){for(let n=0;n<24;n++){const a=(n/24)*Math.PI*2+rnd(-.08,.08),x=Math.round(cx+Math.cos(a)*r),y=Math.round(cy+Math.sin(a)*r);if(!passable(x,y)||buildingAt(x,y,type==="farm"?5:4))continue;const t=terrain[idx(x,y)];if(type==="farm"&&(t!==T.GRASS&&t!==T.FOREST))continue;if(type!=="farm"&&t===T.SAND)continue;return{x,y}}}return null}
-function queueBuilding(type,wood,stone=0){if(buildings.some(b=>b.type===type&&!b.complete))return false;if(settlement.wood<wood||settlement.stone<stone)return false;const site=findBuildSite(type);if(!site)return false;settlement.wood-=wood;settlement.stone-=stone;addBuilding(type,site.x,site.y,false);addEvent(`Construction began on a ${type}.`,"building");return true}
-function planVillage(){const pop=people.filter(p=>p.alive).length,huts=buildingsOf("hut").length,farms=buildingsOf("farm").length;
-  if(huts<Math.ceil(Math.max(2,pop)/4))queueBuilding("hut",8);
-  if(day>3&&!buildings.some(b=>b.type==="stockpile"))queueBuilding("stockpile",10);
-  if(hasTech("Storage")&&day>8&&!hasTech("Agriculture")&&settlement.food>=10)discover("Agriculture","Villagers began saving seed and planning permanent fields.");
-  if(hasTech("Agriculture")&&farms<Math.max(1,Math.ceil(pop/6)))queueBuilding("farm",6);
-  if(pop>=6&&!hasTech("Village Planning"))discover("Village Planning","The growing settlement began organizing buildings around a shared center.");
-  if(day>16&&settlement.wood>=15&&!hasTech("Stoneworking"))discover("Stoneworking","Villagers learned to shape stone gathered from the hills.");
-  if(hasTech("Stoneworking")&&pop>=5&&!buildings.some(b=>b.type==="mine"))queueBuilding("mine",10,2);
-  if(hasTech("Stoneworking")&&pop>=7&&!buildings.some(b=>b.type==="workshop"))queueBuilding("workshop",12,5);
-  if(pop>=8&&hasTech("Agriculture")&&!buildings.some(b=>b.type==="granary"))queueBuilding("granary",14,2);
-  if(!hasTech("Roads")){let found=false;for(let n=0;n<400;n++){const i=rndi(0,N-1);if(trail[i]>85){found=true;break}}if(found)discover("Roads","Repeated foot traffic hardened into the settlement's first permanent paths.")}
+function findBuildSite(type,s=settlement){
+  if(!s)return null;const cx=s.x,cy=s.y;
+  for(let r=4;r<25;r+=2)for(let n=0;n<26;n++){
+    const a=(n/26)*Math.PI*2+rnd(-.08,.08),x=Math.round(cx+Math.cos(a)*r),y=Math.round(cy+Math.sin(a)*r);
+    if(!passable(x,y)||buildingAt(x,y,type==="farm"?5:4))continue;
+    const t=terrain[idx(x,y)];if(type==="farm"&&(t!==T.GRASS&&t!==T.FOREST))continue;if(type!=="farm"&&t===T.SAND)continue;
+    return{x,y}
+  }
+  return null
+}
+function queueBuilding(type,wood,stone=0,s=settlement){
+  if(!s||buildings.some(b=>b.settlementId===s.id&&b.type===type&&!b.complete))return false;
+  if((s.wood||0)<wood||(s.stone||0)<stone)return false;
+  const site=findBuildSite(type,s);if(!site)return false;
+  s.wood-=wood;s.stone-=stone;addBuilding(type,site.x,site.y,false,s.id);
+  addEvent(`${s.name} began construction of a ${type}.`,"building");return true
+}
+function planVillage(s=settlement){
+  if(!s)return;
+  const pop=settlementPopulation(s),local=settlementBuildings(s,false),huts=local.filter(b=>b.complete&&b.type==="hut").length,farms=local.filter(b=>b.complete&&b.type==="farm").length;
+  if(huts<Math.ceil(Math.max(2,pop)/4))queueBuilding("hut",8,0,s);
+  if(day-s.foundedDay>2&&!local.some(b=>b.type==="stockpile"))queueBuilding("stockpile",10,0,s);
+  if(hasTech("Storage",s)&&day-s.foundedDay>6&&!hasTech("Agriculture",s)&&s.food>=10)discover("Agriculture",`${s.name} began saving seed for permanent fields.`,s);
+  if(hasTech("Agriculture",s)&&farms<Math.max(1,Math.ceil(pop/6)))queueBuilding("farm",6,0,s);
+  if(pop>=6&&!hasTech("Village Planning",s))discover("Village Planning",`${s.name} began organizing itself as a true village.`,s);
+  if(day-s.foundedDay>12&&s.wood>=15&&!hasTech("Stoneworking",s))discover("Stoneworking",`${s.name} learned to shape stone.`,s);
+  if(hasTech("Stoneworking",s)&&pop>=5&&!local.some(b=>b.type==="mine"))queueBuilding("mine",10,2,s);
+  if(hasTech("Stoneworking",s)&&pop>=7&&!local.some(b=>b.type==="workshop"))queueBuilding("workshop",12,5,s);
+  if(pop>=8&&hasTech("Agriculture",s)&&!local.some(b=>b.type==="granary"))queueBuilding("granary",14,2,s);
+  if(!hasTech("Roads",s)){
+    let found=false;for(let n=0;n<250;n++){const i=rndi(0,N-1);if(trail[i]>90){found=true;break}}
+    if(found)discover("Roads",`${s.name}'s repeated foot traffic hardened into permanent paths.`,s)
+  }
 }
 function updateFarms(){for(const f of buildingsOf("farm")){const i=idx(clamp(Math.round(f.x),0,WORLD_W-1),clamp(Math.round(f.y),0,WORLD_H-1));const rain=wet[i]>0?1.7:1;f.crop=clamp(f.crop+.045*rain,0,100)}}
-function consumeSettlement(){const alive=people.filter(p=>p.alive).length;if(tick%420===0&&alive>0)settlement.food=Math.max(0,settlement.food-Math.max(1,Math.floor(alive/4)))}
-function simulate(){if(paused)return;const loops=speed===1?1:speed===2?2:5;for(let l=0;l<loops;l++){tick++;day+=.008;people.forEach(think);updateCritters();buildings.forEach(b=>b.age++);updateFarms();consumeSettlement();if(tick%95===0)updateRelationships();if(tick%120===0)assignJobs();if(tick%160===0)livingCivUpdate();if(tick%190===0){planVillage();matchPartners();tryBirths()}if(tick%280===0){for(let n=0;n<280;n++){const x=rndi(0,WORLD_W-1),y=rndi(0,WORLD_H-1),i=idx(x,y);if(terrain[i]===T.GRASS&&food[i]<4&&Math.random()<.15)food[i]++;if(terrain[i]===T.FOREST&&trees[i]<4&&Math.random()<.18)trees[i]++;if(wet[i])wet[i]--;if(scar[i])scar[i]--;if(burn[i])burn[i]=Math.max(0,burn[i]-2)}dirty=true}}
+function consumeSettlement(){
+  if(tick%420!==0)return;
+  for(const s of settlements.length?settlements:[settlement]){
+    if(!s)continue;const alive=settlementPopulation(s);
+    if(alive>0)s.food=Math.max(0,s.food-Math.max(1,Math.floor(alive/4)))
+  }
+}
+function simulate(){if(paused)return;const loops=speed===1?1:speed===2?2:5;for(let l=0;l<loops;l++){tick++;day+=.008;people.forEach(think);updateCritters();buildings.forEach(b=>b.age++);updateFarms();consumeSettlement();if(tick%95===0)updateRelationships();if(tick%120===0)assignJobs();if(tick%160===0)livingCivUpdate();if(tick%190===0){for(const s of settlements)planVillage(s);matchPartners();tryBirths()}if(tick%620===0)attemptExpansion();if(tick%760===0)updatePoliticalWorld();if(tick%280===0){for(let n=0;n<280;n++){const x=rndi(0,WORLD_W-1),y=rndi(0,WORLD_H-1),i=idx(x,y);if(terrain[i]===T.GRASS&&food[i]<4&&Math.random()<.15)food[i]++;if(terrain[i]===T.FOREST&&trees[i]<4&&Math.random()<.18)trees[i]++;if(wet[i])wet[i]--;if(scar[i])scar[i]--;if(burn[i])burn[i]=Math.max(0,burn[i]-2)}dirty=true}}
   particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.life--;p.vy+=p.type==="leaf"?.006:0});particles=particles.filter(p=>p.life>0);clouds.forEach(c=>{c.life--;c.phase+=.015;c.x+=.015});clouds=clouds.filter(c=>c.life>0);updateUI()}
 
 function generate(useExistingSeed=false){
@@ -1159,9 +1507,9 @@ function generate(useExistingSeed=false){
   if(best){sx=best.x;sy=best.y}
   paint(sx,sy,Math.max(11,Math.min(25,Math.round(WORLD_W*.10))),"land",false);
 
-  nextPersonId=1;nextBuildingId=1;nextCritterId=1;
+  nextPersonId=1;nextBuildingId=1;nextCritterId=1;nextSettlementId=1;nextKingdomId=1;nextWarId=1;
   usedNames.clear();usedFirstNames.clear();
-  people=[];
+  people=[];settlements=[];kingdoms=[];wars=[];tradeRoutes=[];settlement=null;
 
   const startPop=configValue("startPopulation");
   for(let n=0;n<startPop;n++){
@@ -1179,9 +1527,11 @@ function generate(useExistingSeed=false){
   buildings=[];events=[];particles=[];clouds=[];critters=[];visualEffects=[];
   day=1;tick=0;camX=sx;camY=sy;zoom=4;dirty=true;undergroundDirty=true;selected=null;
   activeLayer="surface";resourceLayer="surface";
-  settlement={name:"First Hearth",x:sx,y:sy,food:configValue("startingFood"),wood:configValue("startingWood"),stone:0,iron:0,gold:0,coal:0,tech:new Set(),births:0,deaths:0};
+  settlement=createSettlement("First Hearth",sx,sy,people,null);selectedSettlementId=settlement.id;
+  settlement.food=configValue("startingFood");settlement.wood=configValue("startingWood");settlement.stone=0;settlement.iron=0;settlement.gold=0;settlement.coal=0;
+  for(const p of people){p.settlementId=settlement.id;p.originSettlementId=settlement.id}
   generateUnderground();
-  addBuilding("firepit",sx,sy,true);
+  addBuilding("firepit",sx,sy,true,settlement.id);
 
   const sizeScale=clamp(configValue("worldSize")/200,.5,2.5);
   const deerCount=Math.round((2+6*wildlifeScale)*sizeScale),sheepCount=Math.round(3*wildlifeScale*sizeScale),wolfCount=Math.round(1.5*wildlifeScale*sizeScale);
@@ -1489,6 +1839,10 @@ function drawMiniMap(){
   if(activeLayer==="surface"){mmctx.drawImage(terrainCanvas,0,0,terrainCanvas.width,terrainCanvas.height,0,0,w,h)}
   else{mmctx.drawImage(undergroundCanvas,0,0,undergroundCanvas.width,undergroundCanvas.height,0,0,w,h)}
   const sx=w/WORLD_W,sy=h/WORLD_H;
+  if(activeLayer==="surface"){
+    for(const r of tradeRoutes){const a=settlementById(r.aId),b=settlementById(r.bId);if(!a||!b)continue;mmctx.strokeStyle="rgba(245,210,124,.55)";mmctx.lineWidth=1;mmctx.beginPath();mmctx.moveTo(a.x*sx,a.y*sy);mmctx.lineTo(b.x*sx,b.y*sy);mmctx.stroke()}
+    for(const s of settlements){mmctx.fillStyle=polityColor(s,1);mmctx.beginPath();mmctx.arc(s.x*sx,s.y*sy,3,0,Math.PI*2);mmctx.fill();mmctx.strokeStyle="rgba(255,255,255,.75)";mmctx.lineWidth=1;mmctx.stroke()}
+  }
   for(const b of buildings){if(!b.complete)continue;mmctx.fillStyle=b.type==="mine"?"#f3ca6d":"#f3f1dd";mmctx.fillRect(b.x*sx-1,b.y*sy-1,3,3)}
   for(const p of people){if(!p.alive)continue;if(activeLayer==="surface"&&p.layer==="underground")continue;if(activeLayer==="underground"&&p.layer!=="underground")continue;mmctx.fillStyle=p.layer==="underground"?"#e8c28a":"#ffffff";mmctx.fillRect(p.x*sx,p.y*sy,2,2)}
   const v=viewportWorldSize(),left=(camX-v.w/2)*sx,top=(camY-v.h/2)*sy,vw=v.w*sx,vh=v.h*sy;
@@ -1509,6 +1863,50 @@ function renderUnderground(){
   if(wr>wl&&wb>wt){ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";ctx.drawImage(undergroundCanvas,wl*TEX,wt*TEX,(wr-wl)*TEX,(wb-wt)*TEX,(wl-viewLeft)*s,(wt-viewTop)*s,(wr-wl)*s,(wb-wt)*s)}
   drawUndergroundResources();buildingsOf("mine").forEach(drawMineShaftUnderground);people.filter(p=>p.layer==="underground").sort((a,b)=>a.py-b.py).forEach(drawPerson);if(settings.effects)drawParticles();
   const topGlow=ctx.createLinearGradient(0,0,0,canvas.height*.28);topGlow.addColorStop(0,"rgba(255,190,88,.08)");topGlow.addColorStop(1,"rgba(0,0,0,0)");ctx.fillStyle=topGlow;ctx.fillRect(0,0,canvas.width,canvas.height);drawVignette();drawMiniMap()
+}
+function polityColor(s,alpha=1){
+  const k=settlementKingdom(s),index=k?k.colorIndex:s.colorIndex;
+  const hex=polityColors[index%polityColors.length];
+  if(alpha>=1)return hex;
+  const n=parseInt(hex.slice(1),16),r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+  return `rgba(${r},${g},${b},${alpha})`
+}
+function drawPoliticalLayer(){
+  if(activeLayer!=="surface"||settlements.length<2)return;
+  ctx.save();
+  // Trade routes
+  for(const r of tradeRoutes){
+    const a=settlementById(r.aId),b=settlementById(r.bId);if(!a||!b)continue;
+    const A=worldToScreen(a.x,a.y),B=worldToScreen(b.x,b.y);
+    ctx.strokeStyle="rgba(244,211,128,.28)";ctx.lineWidth=Math.max(1,Math.min(3,cameraScale()*.08));
+    ctx.setLineDash([6,7]);ctx.beginPath();ctx.moveTo(A.x,A.y);ctx.quadraticCurveTo((A.x+B.x)/2,(A.y+B.y)/2-12,B.x,B.y);ctx.stroke()
+  }
+  ctx.setLineDash([]);
+  // Soft territories and settlement banners
+  for(const s of settlements){
+    const P=worldToScreen(s.x,s.y),z=cameraScale(),rad=settlementRadius(s)*z;
+    if(rad<canvas.width*1.2){
+      ctx.fillStyle=polityColor(s,.028);ctx.strokeStyle=polityColor(s,.25);ctx.lineWidth=Math.max(1,z*.08);
+      ctx.beginPath();ctx.arc(P.x,P.y,rad,0,Math.PI*2);ctx.fill();ctx.stroke()
+    }
+    const pop=settlementPopulation(s);
+    ctx.fillStyle="rgba(8,17,20,.80)";ctx.beginPath();
+    if(ctx.roundRect)ctx.roundRect(P.x-z*1.1,P.y-z*2.9,z*2.2,z*.95,z*.25);else ctx.rect(P.x-z*1.1,P.y-z*2.9,z*2.2,z*.95);
+    ctx.fill();
+    ctx.fillStyle=polityColor(s,1);ctx.fillRect(P.x-z*.88,P.y-z*2.68,z*.28,z*.40);
+    if(zoom>=3.7){
+      ctx.fillStyle="#f5f8f7";ctx.textAlign="left";ctx.font=`700 ${Math.max(7,Math.round(z*.55))}px -apple-system,system-ui`;
+      ctx.fillText(`${s.name} · ${pop}`,P.x-z*.46,P.y-z*2.35)
+    }
+  }
+  // Active war fronts
+  for(const w of wars.filter(w=>w.status==="active")){
+    const a=settlementById(w.aId),b=settlementById(w.bId);if(!a||!b)continue;
+    const x=(a.x+b.x)/2,y=(a.y+b.y)/2,P=worldToScreen(x,y),z=cameraScale();
+    ctx.fillStyle="rgba(30,20,18,.84)";ctx.beginPath();ctx.arc(P.x,P.y,z*.85,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#f1d3b5";ctx.textAlign="center";ctx.font=`${Math.max(9,z*.75)}px system-ui`;ctx.fillText("⚔",P.x,P.y+z*.25)
+  }
+  ctx.restore()
 }
 function drawCritter(c){
   const s=worldToScreen(c.px,c.py),base=clamp(cameraScale(),2.8,12),z=base*.88,bob=Math.sin(c.phase*1.15)*z*.045,dir=c.dir||1;
@@ -1663,7 +2061,7 @@ function render(){
   if(dirty)rebuildTerrain();clampCamera();ctx.fillStyle="#1c4f6f";ctx.fillRect(0,0,canvas.width,canvas.height);
   const s=cameraScale(),v=viewportWorldSize(),viewLeft=camX-v.w/2,viewTop=camY-v.h/2,wl=Math.max(0,viewLeft),wt=Math.max(0,viewTop),wr=Math.min(WORLD_W,viewLeft+v.w),wb=Math.min(WORLD_H,viewTop+v.h);
   if(wr>wl&&wb>wt){ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";ctx.drawImage(terrainCanvas,wl*TEX,wt*TEX,(wr-wl)*TEX,(wb-wt)*TEX,(wl-viewLeft)*s,(wt-viewTop)*s,(wr-wl)*s,(wb-wt)*s)}
-  drawOrganicLandOverlay();drawCoastalBlend();drawSurfaceAtmosphere();drawWater();if(settings.trails)drawTrails();drawGroundDetails();drawHazards();drawTerrainFeatures();buildings.slice().sort((a,b)=>a.y-b.y).forEach(drawBuilding);critters.slice().sort((a,b)=>a.py-b.py).forEach(drawCritter);people.filter(p=>p.layer!=="underground").sort((a,b)=>a.py-b.py).forEach(drawPerson);if(settings.effects){drawParticles();drawTransientEffects()}drawClouds();drawLighting();drawVignette();drawMiniMap()
+  drawOrganicLandOverlay();drawCoastalBlend();drawSurfaceAtmosphere();drawWater();if(settings.trails)drawTrails();drawPoliticalLayer();drawGroundDetails();drawHazards();drawTerrainFeatures();buildings.slice().sort((a,b)=>a.y-b.y).forEach(drawBuilding);critters.slice().sort((a,b)=>a.py-b.py).forEach(drawCritter);people.filter(p=>p.layer!=="underground").sort((a,b)=>a.py-b.py).forEach(drawPerson);if(settings.effects){drawParticles();drawTransientEffects()}drawClouds();drawLighting();drawVignette();drawMiniMap()
 }
 function eraName(){const pop=people.filter(p=>p.alive).length;if(pop>=18)return"Village";if(pop>=10)return"Hamlet";if(pop>=5)return"Growing Camp";if(buildingsOf("hut").length)return"Early Settlement";return"Primitive"}
 function jobCounts(){const c={};for(const p of people.filter(p=>p.alive)){c[p.job]=(c[p.job]||0)+1}return c}
@@ -1683,6 +2081,7 @@ function showCitizen(p){
   citizenBody.innerHTML=`<div class="stats"><div class="stat">❤️ Health<b>${Math.round(p.health)}%</b></div><div class="stat">😊 Happy<b>${Math.round(p.happiness||0)}%</b></div><div class="stat">⚡ Energy<b>${Math.round(p.energy)}%</b></div><div class="stat">😟 Stress<b>${Math.round(p.stress||0)}%</b></div></div>
   <div class="citizenRow"><span class="jobBadge">🛠 ${escapeHtml(p.job)}</span> <span class="jobBadge">🧠 ${escapeHtml(aiTraitLabel(p))}</span> <span class="jobBadge">📖 ${Math.round(p.education||0)} edu</span><br><b>Current goal:</b> ${escapeHtml(p.goal)}<br><b>Life goal:</b> ${escapeHtml(p.longGoal||"Build a stable life")}<br><b>Mood:</b> ${escapeHtml(p.mood)}<br><b>Why:</b> ${escapeHtml(p.decisionReason||"Observing the world")}</div>
   <div class="family"><b>Status:</b> ${relationLabel}<br><b>Partner:</b> ${partner?escapeHtml(partner.name):"None"}${partner?`<br><b>Relationship bond:</b> ${bond}/100`:""}${p.relationshipStage==="married"?`<br><b>Family surname:</b> ${escapeHtml(surnameOf(p))}<br><b>Married:</b> Day ${p.marriageDay}`:""}<br><b>Birth name:</b> ${escapeHtml(p.birthName||p.name)}<br><b>Parents:</b> ${parents.length?parents.map(x=>escapeHtml(x.name)).join(", "):"—"}<br><b>Children:</b> ${children.length?children.map(x=>escapeHtml(x.name)).join(", "):"None"}<br><b>Home:</b> ${home?`Hut #${home.id}`:"No permanent home"}<br><b>Mentor:</b> ${mentor?escapeHtml(mentor.name):"None"}</div>
+  <div class="citizenRow"><b>Settlement:</b> ${escapeHtml(citizenSettlement(p)?.name||"None")}<br><b>Citizenship:</b> ${p.refugee?"Refugee / new arrival":"Resident"}${p.militaryRole?`<br><b>Military:</b> ${escapeHtml(p.militaryRole)}`:""}${citizenSettlement(p)?.leaderId===p.id?`<br><b>Office:</b> Leader of ${escapeHtml(citizenSettlement(p).name)}`:""}${(p.citizenshipHistory||[]).length?`<br><b>Migration:</b> ${escapeHtml(p.citizenshipHistory[0])}`:""}</div>
   <div class="citizenRow"><b>Best friend:</b> ${best?escapeHtml(best.name):"None yet"}<br><b>Rival:</b> ${rival?escapeHtml(rival.name):"None"}<br><b>Wealth:</b> ${(p.wealth||0).toFixed(1)} · <b>Reputation:</b> ${Math.round(p.reputation||0)}<br><b>Possessions:</b> ${p.possessions?.tools||0} tools · ${p.possessions?.keepsakes||0} keepsakes</div>
   <div class="skillBox"><b>Skills</b>${skillRows}</div>
   <div class="memory"><b>Life memories</b><br>${(p.memory||[]).slice(0,5).map(m=>`• ${escapeHtml(m)}`).join("<br>")||"None"}</div>
@@ -1701,7 +2100,10 @@ function updateUI(){if(!settlement)return;popEl.textContent=people.filter(p=>p.a
 function spawnHumanAt(wx,wy,age=20){
   if(!passable(wx,wy)){showToast("Choose dry land");return null}
   const sex=Math.random()<.5?"F":"M",name=generateUniqueName();
-  const p=makePerson(name,wx,wy,sex,age);people.push(p);addEvent(`${name} was placed into the world by the Creator.`,"divine");return p
+  const p=makePerson(name,wx,wy,sex,age);
+  const nearest=settlements.slice().sort((a,b)=>Math.hypot(a.x-wx,a.y-wy)-Math.hypot(b.x-wx,b.y-wy))[0]||settlement;
+  if(nearest){p.settlementId=nearest.id;p.originSettlementId=nearest.id}
+  people.push(p);addEvent(`${name} was placed into ${nearest?.name||"the world"} by the Creator.`,"divine");return p
 }
 function applyTool(wx,wy,continuous=false){
   wx=Math.round(wx);wy=Math.round(wy);if(wx<0||wy<0||wx>=WORLD_W||wy>=WORLD_H)return;
@@ -1720,6 +2122,7 @@ function applyTool(wx,wy,continuous=false){
     a.relations[b.id]=66;b.relations[a.id]=66;marryCouple(a,b);
     const familyName=surnameOf(a),childName=generateUniqueName(null,familyName);
     const child=makePerson(childName,wx,wy+1,Math.random()<.5?"F":"M",6,[a.id,b.id]);
+    child.settlementId=a.settlementId;child.originSettlementId=a.settlementId;
     people.push(child);child.job="Child";a.children.push(child.id);b.children.push(child.id);
     addEvent(`The ${familyName} family was placed into Tiny World.`,"divine")
   }assignJobs();return}
@@ -1765,7 +2168,7 @@ function worldCreatorHtml(){
   ${rangeRow("mountains","Mountain Density","⛰️",0,100,1,"%")}
   <div class="menuSection">Life</div>
   ${rangeRow("wildlife","Wildlife Amount","🦌",0,100,1,"%")}
-  ${rangeRow("startPopulation","Starting People","👥",2,12,1,"")}
+  ${rangeRow("startPopulation","Starting People","👥",2,20,1,"")}
   <div class="menuSection">Starting Supplies</div>
   ${rangeRow("startingFood","Starting Food","🍎",0,60,1,"")}
   ${rangeRow("startingWood","Starting Wood","🪵",0,40,1,"")}
@@ -1785,10 +2188,13 @@ function worldResetHtml(){
   <button class="bigAction danger" data-action="reset-current-world" type="button">${resetWorldArmed?"⚠️ Tap again to confirm reset":"↺ Reset Current World"}</button>`
 }
 function worldOverviewHtml(){
-  return `<div class="menuHero"><div class="eyebrow">Current world · ${worldAreaLabel()}</div><h3>${escapeHtml(settlement.name)}</h3><p>Day ${Math.floor(day)} · ${eraName()} · Seed ${worldSeed}</p></div>
-  <div class="menuGrid"><div class="menuStat"><small>Population</small><b>${people.filter(p=>p.alive).length}</b></div><div class="menuStat"><small>Families</small><b>${new Set(people.filter(p=>p.alive).map(p=>surnameOf(p))).size}</b></div><div class="menuStat"><small>Avg happiness</small><b>${people.some(p=>p.alive)?Math.round(people.filter(p=>p.alive).reduce((s,p)=>s+(p.happiness||0),0)/people.filter(p=>p.alive).length):0}%</b></div><div class="menuStat"><small>Discoveries</small><b>${settlement.tech.size}</b></div></div>
+  const alive=people.filter(p=>p.alive),activeWars=wars.filter(w=>w.status==="active");
+  return `<div class="menuHero"><div class="eyebrow">Living world · ${worldAreaLabel()}</div><h3>${settlements.length} settlement${settlements.length===1?"":"s"}</h3><p>Day ${Math.floor(day)} · ${eraName()} · Seed ${worldSeed}</p></div>
+  <div class="menuGrid"><div class="menuStat"><small>Population</small><b>${alive.length}</b></div><div class="menuStat"><small>Settlements</small><b>${settlements.length}</b></div><div class="menuStat"><small>Kingdoms</small><b>${kingdoms.length}</b></div><div class="menuStat"><small>Active wars</small><b>${activeWars.length}</b></div></div>
+  <div class="menuSection">World civilization</div>
+  <div class="civRows"><div class="civRow"><span>🤝 Trade routes</span><span>${tradeRoutes.length}</span></div><div class="civRow"><span>👑 Rulers / leaders</span><span>${settlements.filter(s=>settlementLeader(s)).length}</span></div><div class="civRow"><span>⚔️ Military strength</span><span>${settlements.reduce((n,s)=>n+militaryStrength(s),0)}</span></div><div class="civRow"><span>🏠 Families</span><span>${new Set(alive.map(p=>surnameOf(p))).size}</span></div></div>
   <div class="menuSection">World makeup</div>
-  <div class="civRows"><div class="civRow"><span>🌿 Habitable land</span><span>${Math.round((tileCount(T.GRASS)+tileCount(T.FOREST)+tileCount(T.SAND))/N*100)}%</span></div><div class="civRow"><span>🌊 Water</span><span>${Math.round((tileCount(T.WATER)+tileCount(T.DEEP))/N*100)}%</span></div><div class="civRow"><span>⛰ Mountain / snow</span><span>${Math.round((tileCount(T.MOUNTAIN)+tileCount(T.SNOW))/N*100)}%</span></div><div class="civRow"><span>🌋 Lava</span><span>${tileCount(T.LAVA)} tiles</span></div><div class="civRow"><span>⛏ Underground mines</span><span>${buildingsOf("mine").length}</span></div><div class="civRow"><span>⛓ Underground iron</span><span>${undergroundCount(uIron)}</span></div><div class="civRow"><span>🟡 Underground gold</span><span>${undergroundCount(uGold)}</span></div></div>`
+  <div class="civRows"><div class="civRow"><span>🌿 Habitable land</span><span>${Math.round((tileCount(T.GRASS)+tileCount(T.FOREST)+tileCount(T.SAND))/N*100)}%</span></div><div class="civRow"><span>🌊 Water</span><span>${Math.round((tileCount(T.WATER)+tileCount(T.DEEP))/N*100)}%</span></div><div class="civRow"><span>⛰ Mountain / snow</span><span>${Math.round((tileCount(T.MOUNTAIN)+tileCount(T.SNOW))/N*100)}%</span></div></div>`
 }
 function peopleHtml(){
   const alive=people.filter(p=>p.alive);
@@ -1810,20 +2216,38 @@ function familyRegistryHtml(){
   }).join("");
   return `<div class="menuHero"><div class="eyebrow">Family Registry</div><h3>${families.size} family names</h3><p>Living and deceased relatives remain part of the civilization's recorded lineage.</p></div>${cards}`
 }
+function civilizationsHtml(){
+  const settlementCards=settlements.slice().sort((a,b)=>settlementPopulation(b)-settlementPopulation(a)).map(s=>{
+    const leader=settlementLeader(s),k=settlementKingdom(s),pop=settlementPopulation(s),army=armyMembers(s),rel=settlements.filter(o=>o.id!==s.id).map(o=>({o,v:relationScore(s,o)})).sort((a,b)=>b.v-a.v);
+    return `<button class="civCard" data-settlement="${s.id}" type="button"><div class="civFlag" style="background:${polityColor(s,1)}"></div><div class="grow"><b>${escapeHtml(s.name)}</b><small>${escapeHtml(s.identity)} · founded day ${s.foundedDay}${k?` · ${escapeHtml(k.name)}`:" · Independent"}</small><div class="civMiniStats"><span>👥 ${pop}</span><span>👑 ${leader?escapeHtml(leader.name):"—"}</span><span>⚔ ${army.length}</span><span>📦 ${Math.floor(s.food)}</span></div>${rel.length?`<small>Best relation: ${escapeHtml(rel[0].o.name)} (${relationLabel(rel[0].v)})</small>`:""}</div></button>`
+  }).join("");
+  const kingdomCards=kingdoms.length?kingdoms.map(k=>{const cap=settlementById(k.capitalId),r=kingdomRuler(k),members=k.memberIds.map(id=>settlementById(id)).filter(Boolean);return `<div class="kingdomCard"><div class="familyCardHead"><div><b>👑 ${escapeHtml(k.name)}</b><small>Founded day ${k.foundedDay} · ${members.length} settlements</small></div><span class="kingdomSwatch" style="background:${polityColors[k.colorIndex%polityColors.length]}"></span></div><div class="civRows"><div class="civRow"><span>Capital</span><span>${escapeHtml(cap?.name||"—")}</span></div><div class="civRow"><span>Ruler</span><span>${escapeHtml(r?.name||"—")}</span></div><div class="civRow"><span>Population</span><span>${members.reduce((n,s)=>n+settlementPopulation(s),0)}</span></div><div class="civRow"><span>Wars won</span><span>${k.warsWon||0}</span></div></div></div>`}).join(""):`<div class="emptyState">No kingdom has formed yet. Friendly settlements can unite as the world develops.</div>`;
+  return `<div class="menuHero"><div class="eyebrow">Civilizations</div><h3>${settlements.length} settlements · ${kingdoms.length} kingdoms</h3><p>Settlements migrate, govern themselves, trade, ally, rival and can unite into larger realms.</p></div><div class="menuSection">Settlements</div>${settlementCards}<div class="menuSection">Kingdoms</div>${kingdomCards}`
+}
 function villageHtml(){
-  const counts=jobCounts(),complete=buildings.filter(b=>b.complete),pending=buildings.filter(b=>!b.complete),alive=people.filter(p=>p.alive),homes=new Set(alive.map(p=>p.homeId).filter(Boolean)).size,avgHappy=alive.length?Math.round(alive.reduce((s,p)=>s+(p.happiness||0),0)/alive.length):0,avgEdu=alive.length?Math.round(alive.reduce((s,p)=>s+(p.education||0),0)/alive.length):0;
-  return `<div class="menuHero"><div class="eyebrow">Village</div><h3>${escapeHtml(settlement.name)}</h3><p>${eraName()} · capacity ${homeCapacity()} · ${pending.length} active construction project${pending.length===1?"":"s"}</p></div>
-  <div class="resourceGrid"><div class="resourceCard">🍎 Food<b>${Math.floor(settlement.food)}</b></div><div class="resourceCard">🪵 Wood<b>${Math.floor(settlement.wood)}</b></div><div class="resourceCard">🪨 Stone<b>${Math.floor(settlement.stone)}</b></div><div class="resourceCard">⛓ Iron<b>${Math.floor(settlement.iron||0)}</b></div><div class="resourceCard">🟡 Gold<b>${Math.floor(settlement.gold||0)}</b></div></div>
-  <div class="menuSection">Society</div><div class="civRows"><div class="civRow"><span>😊 Average happiness</span><span>${avgHappy}%</span></div><div class="civRow"><span>📖 Average education</span><span>${avgEdu}</span></div><div class="civRow"><span>🏠 Occupied homes</span><span>${homes}</span></div><div class="civRow"><span>🧓 Elders</span><span>${alive.filter(p=>p.lifeStage==="Elder").length}</span></div><div class="civRow"><span>🧒 Young people</span><span>${alive.filter(p=>p.age<18).length}</span></div></div>
-  <div class="menuSection">Jobs</div><div class="civRows">${Object.entries(counts).map(([k,v])=>`<div class="civRow"><span>${escapeHtml(k)}</span><span>${v}</span></div>`).join("")}</div>
-  <div class="menuSection">Buildings</div><div class="civRows">${["firepit","hut","stockpile","farm","mine","granary","workshop"].map(t=>`<div class="civRow"><span>${t[0].toUpperCase()+t.slice(1)}</span><span>${buildingsOf(t).length}</span></div>`).join("")}</div>
-  <div class="menuSection">Discoveries</div><div class="techList">${techNames.map(t=>`<span class="tech ${hasTech(t)?"":"locked"}">${hasTech(t)?"✓ ":""}${t}</span>`).join("")}</div>`
+  const s=settlementById(selectedSettlementId)||settlement;selectedSettlementId=s.id;
+  const residents=settlementPeople(s,true),complete=settlementBuildings(s,true),pending=settlementBuildings(s,false).filter(b=>!b.complete),leader=settlementLeader(s),k=settlementKingdom(s);
+  const avgHappy=residents.length?Math.round(residents.reduce((n,p)=>n+(p.happiness||0),0)/residents.length):0;
+  return `<div class="menuHero"><div class="eyebrow">${k?escapeHtml(k.name):"Independent settlement"}</div><h3>${escapeHtml(s.name)}</h3><p>${escapeHtml(s.identity)} · founded day ${s.foundedDay} · territory radius ${Math.round(settlementRadius(s))}</p></div>
+  <div class="resourceGrid"><div class="resourceCard">👥 People<b>${residents.length}</b></div><div class="resourceCard">🍎 Food<b>${Math.floor(s.food)}</b></div><div class="resourceCard">🪵 Wood<b>${Math.floor(s.wood)}</b></div><div class="resourceCard">🪨 Stone<b>${Math.floor(s.stone)}</b></div><div class="resourceCard">⛓ Iron<b>${Math.floor(s.iron||0)}</b></div></div>
+  <div class="menuSection">Government</div><div class="civRows"><div class="civRow"><span>👑 Leader</span><span>${escapeHtml(leader?.name||"None")}</span></div><div class="civRow"><span>🏰 Realm</span><span>${escapeHtml(k?.name||"Independent")}</span></div><div class="civRow"><span>🎭 Identity</span><span>${escapeHtml(s.identity)}</span></div><div class="civRow"><span>✨ Prosperity</span><span>${Math.round(s.prosperity||50)}%</span></div><div class="civRow"><span>⚔ Military</span><span>${militaryStrength(s)}</span></div></div>
+  <div class="menuSection">Society</div><div class="civRows"><div class="civRow"><span>😊 Happiness</span><span>${avgHappy}%</span></div><div class="civRow"><span>🏠 Buildings</span><span>${complete.length}</span></div><div class="civRow"><span>🔨 Construction</span><span>${pending.length}</span></div><div class="civRow"><span>👶 Births</span><span>${s.births}</span></div><div class="civRow"><span>🕯 Deaths</span><span>${s.deaths}</span></div></div>
+  <div class="menuSection">Other settlements</div>${settlements.filter(o=>o.id!==s.id).map(o=>`<button class="listCard" data-settlement="${o.id}" type="button"><div class="civFlag small" style="background:${polityColor(o,1)}"></div><div class="grow"><b>${escapeHtml(o.name)}</b><small>${relationLabel(relationScore(s,o))} · relation ${Math.round(relationScore(s,o))}</small></div><div class="rightText">👥 ${settlementPopulation(o)}</div></button>`).join("")||`<div class="emptyState">No other settlement exists yet.</div>`}`
 }
 function warHtml(){
-  return `<div class="menuHero"><div class="eyebrow">Warfare foundation</div><h3>Peace in the first age</h3><p>This panel is already structured for factions, diplomacy, armies and wars as civilization expands beyond one settlement.</p></div>
-  <div class="menuGrid"><div class="menuStat"><small>Factions</small><b>1</b></div><div class="menuStat"><small>Active wars</small><b>0</b></div><div class="menuStat"><small>Armies</small><b>0</b></div><div class="menuStat"><small>Relations</small><b>Peace</b></div></div>
-  <div class="menuSection">Future war information</div><div class="civRows"><div class="civRow"><span>⚔️ Army strength</span><span>Not formed</span></div><div class="civRow"><span>🛡 Defenses</span><span>None</span></div><div class="civRow"><span>🤝 Diplomacy</span><span>Single faction</span></div><div class="civRow"><span>🏰 Kingdoms</span><span>Awaiting expansion</span></div></div>
-  <div class="warningBox" style="margin-top:10px">When multiple settlements and kingdoms arrive, this page becomes the war room: alliances, enemies, casualties, occupied land and battle history.</div>`
+  const active=wars.filter(w=>w.status==="active");
+  const relationRows=[];
+  for(let i=0;i<settlements.length;i++)for(let j=i+1;j<settlements.length;j++){
+    const a=settlements[i],b=settlements[j],v=relationScore(a,b);
+    relationRows.push(`<div class="diplomacyRow"><span class="dot" style="background:${polityColor(a,1)}"></span><b>${escapeHtml(a.name)}</b><span>↔</span><span class="dot" style="background:${polityColor(b,1)}"></span><b>${escapeHtml(b.name)}</b><em>${relationLabel(v)} ${Math.round(v)}</em></div>`)
+  }
+  const activeCards=active.length?active.map(w=>{const a=settlementById(w.aId),b=settlementById(w.bId);return `<div class="warCard"><div class="warTitle">⚔ ${escapeHtml(a?.name||"?")} vs ${escapeHtml(b?.name||"?")}</div><small>Day ${w.startDay} · ${escapeHtml(w.cause)}</small><div class="warSides"><div><b>${militaryStrength(a)}</b><span>strength</span><small>${w.casualtiesA} lost</small></div><div class="versus">VS</div><div><b>${militaryStrength(b)}</b><span>strength</span><small>${w.casualtiesB} lost</small></div></div><div class="civRow"><span>Battles fought</span><span>${w.battles}</span></div></div>`}).join(""):`<div class="emptyState">No active wars. Rivalries can still grow through borders, scarcity and diplomacy.</div>`;
+  const past=wars.filter(w=>w.status!=="active").slice(-5).reverse().map(w=>{const a=settlementById(w.aId),b=settlementById(w.bId),winner=settlementById(w.winnerId);return `<div class="updateItem"><b>${escapeHtml(a?.name||"?")} vs ${escapeHtml(b?.name||"?")}</b><small>Days ${w.startDay}–${w.endDay||"?"}</small><p>${winner?`${escapeHtml(winner.name)} prevailed.`:"Peace without a clear victor."} Casualties: ${w.casualtiesA+w.casualtiesB}.</p></div>`}).join("");
+  return `<div class="menuHero"><div class="eyebrow">War Room</div><h3>${active.length} active war${active.length===1?"":"s"}</h3><p>Armies are formed from real citizens. Battles can kill named people, create refugees and change political control.</p></div>
+  <div class="menuGrid"><div class="menuStat"><small>Settlements</small><b>${settlements.length}</b></div><div class="menuStat"><small>Kingdoms</small><b>${kingdoms.length}</b></div><div class="menuStat"><small>Armies</small><b>${settlements.filter(s=>armyMembers(s).length).length}</b></div><div class="menuStat"><small>Trade routes</small><b>${tradeRoutes.length}</b></div></div>
+  <div class="menuSection">Active conflicts</div>${activeCards}
+  <div class="menuSection">Diplomacy</div>${relationRows.join("")||`<div class="emptyState">A second settlement is needed before diplomacy begins.</div>`}
+  ${past?`<div class="menuSection">Recent wars</div>${past}`:""}`
 }
 function historyHtml(){
   return events.length?events.map(e=>`<div class="updateItem"><b>Day ${e.day}</b><small>${escapeHtml(e.kind)}</small><p>${escapeHtml(e.text)}</p></div>`).join(""):`<div class="emptyState">No history yet.</div>`
@@ -1834,18 +2258,20 @@ function settingsHtml(){
   <div class="menuSection">World management</div><button class="bigAction" data-action="center-world" type="button">⌾ Center on First Hearth</button><button class="bigAction" data-action="open-world-creator" type="button">🌍 Open World Creator</button><button class="bigAction danger" data-action="open-world-reset" type="button">↺ Reset Current World</button>`
 }
 function updatesHtml(){
-  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V8.3 · Natural Coastline Water</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
-  <div class="updateItem"><b>V8.2 — Natural Effects</b><small>Current</small><p>Lightning is now a real branching strike with a brief flash instead of a grid of hazard markers. Fire uses irregular animated flame clusters and embers. The broad turquoise ocean halo was removed at the terrain-color level, leaving only a narrow coastal shallows transition and moving foam.</p></div><div class="updateItem"><b>V8.1 — Living Ocean</b><small>Previous</small><p>Ocean animation moved to real elapsed frame time with traveling wave bands and tidal surf.</p></div><div class="updateItem"><b>V8 — Premium Painted World</b><small>Previous</small><p>The surface renderer moved to continuous height/moisture sampling with smoothed terrain, mixed forests and upgraded miniature people and wildlife.</p></div><div class="updateItem"><b>V7.2 — Painted World Pass</b><small>Previous</small><p>Added larger painterly land dabs, softer shore blending, stronger surf and more organic forest shapes.</p></div><div class="updateItem"><b>V7.1 — Brushed World Pass</b><small>Previous</small><p>Terrain leans harder into a brushed look with stronger painterly dabs, forests render more organically, and water has much more visible motion and shoreline surf.</p></div><div class="updateItem"><b>V7 — Premium Art Pass</b><small>Previous</small><p>The world now uses a richer painterly land overlay, softer coastal blending, more alive shore water, refined huts and farms, and upgraded tiny sprites so citizens and animals feel like miniature living beings in a premium-looking world.</p></div><div class="updateItem"><b>V6.6 — Organic Terrain + Sprite Overhaul</b><small>Previous</small><p>Coastlines became softer, shoreline water gained a light tide effect, wave motion became more visible, and both citizens and animals received upgraded tiny vector sprites.</p></div><div class="updateItem"><b>V6.5 — Grand Graphics Overhaul</b><small>Previous</small><p>The world surface was rebuilt with sharper texturing, richer biome color, animated wave motion, improved shoreline foam, bush-like food clusters, cleaner low-zoom forest rendering and stronger visual grounding between the land and the citizens.</p></div><div class="updateItem"><b>V6 — Living Civilization</b><small>Previous</small><p>Citizens age, learn, build skills, form households, create families, experience grief and leave a lineage behind.</p></div><div class="updateItem"><b>V5.4 — World Scale</b><small>Previous</small><p>Dynamic 100×100 through 500×500 world sizes.</p></div><div class="updateItem"><b>V5.3 — Family & Marriage</b><small>Previous</small><p>Dating, emotional bonds, marriage, shared surnames, breakups and child surname inheritance.</p></div><div class="updateItem"><b>V5.2 — Responsive World</b><small>Previous</small><p>Responsive landscape catalogs, smaller wording and procedural unique names.</p></div><div class="updateItem"><b>V5.1 — Living World</b><small>Previous</small><p>Compact HUD, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs and relationships.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
+  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V9 · Civilizations & Kingdoms</h3><p>Settlements can now migrate, govern themselves, trade, form kingdoms, fight wars and generate their own political history.</p></div>
+  <div class="updateItem"><b>V9 — Civilizations & Kingdoms</b><small>Current</small><p>Population pressure can create new settlements led by real migrating families. Every settlement has resources, buildings, territory, leaders, identity, diplomacy and military strength. Settlements trade, form kingdoms, develop rivalries, fight wars with named citizen casualties, and generate refugees whose citizenship histories persist.</p></div>
+  <div class="updateItem"><b>V8.3 — Natural Coastline Water</b><small>Previous</small><p>Natural shallow-water shelves and coastline-oriented animated surf.</p></div>
+  <div class="updateItem"><b>V8.2 — Natural Effects</b><small>Previous</small><p>Lightning is now a real branching strike with a brief flash instead of a grid of hazard markers. Fire uses irregular animated flame clusters and embers. The broad turquoise ocean halo was removed at the terrain-color level, leaving only a narrow coastal shallows transition and moving foam.</p></div><div class="updateItem"><b>V8.1 — Living Ocean</b><small>Previous</small><p>Ocean animation moved to real elapsed frame time with traveling wave bands and tidal surf.</p></div><div class="updateItem"><b>V8 — Premium Painted World</b><small>Previous</small><p>The surface renderer moved to continuous height/moisture sampling with smoothed terrain, mixed forests and upgraded miniature people and wildlife.</p></div><div class="updateItem"><b>V7.2 — Painted World Pass</b><small>Previous</small><p>Added larger painterly land dabs, softer shore blending, stronger surf and more organic forest shapes.</p></div><div class="updateItem"><b>V7.1 — Brushed World Pass</b><small>Previous</small><p>Terrain leans harder into a brushed look with stronger painterly dabs, forests render more organically, and water has much more visible motion and shoreline surf.</p></div><div class="updateItem"><b>V7 — Premium Art Pass</b><small>Previous</small><p>The world now uses a richer painterly land overlay, softer coastal blending, more alive shore water, refined huts and farms, and upgraded tiny sprites so citizens and animals feel like miniature living beings in a premium-looking world.</p></div><div class="updateItem"><b>V6.6 — Organic Terrain + Sprite Overhaul</b><small>Previous</small><p>Coastlines became softer, shoreline water gained a light tide effect, wave motion became more visible, and both citizens and animals received upgraded tiny vector sprites.</p></div><div class="updateItem"><b>V6.5 — Grand Graphics Overhaul</b><small>Previous</small><p>The world surface was rebuilt with sharper texturing, richer biome color, animated wave motion, improved shoreline foam, bush-like food clusters, cleaner low-zoom forest rendering and stronger visual grounding between the land and the citizens.</p></div><div class="updateItem"><b>V6 — Living Civilization</b><small>Previous</small><p>Citizens age, learn, build skills, form households, create families, experience grief and leave a lineage behind.</p></div><div class="updateItem"><b>V5.4 — World Scale</b><small>Previous</small><p>Dynamic 100×100 through 500×500 world sizes.</p></div><div class="updateItem"><b>V5.3 — Family & Marriage</b><small>Previous</small><p>Dating, emotional bonds, marriage, shared surnames, breakups and child surname inheritance.</p></div><div class="updateItem"><b>V5.2 — Responsive World</b><small>Previous</small><p>Responsive landscape catalogs, smaller wording and procedural unique names.</p></div><div class="updateItem"><b>V5.1 — Living World</b><small>Previous</small><p>Compact HUD, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs and relationships.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
   <div class="updateItem"><b>V4.1 — Underground</b><small>Previous</small><p>Surface/Underground toggle, caves, deep stone, underground lakes, magma, iron/gold/coal/crystal veins, mine entrances, tunneling miners and layer-aware god powers.</p></div>
   <div class="updateItem"><b>V4 — World Control</b><small>Previous</small><p>World, God Powers and Resources tabs; full people/village/history/settings panels; biome painting; fire and lava; iron and gold; wildlife; direct people spawning; persistent visual settings.</p></div>
   <div class="updateItem"><b>V3 — Civilization</b><small>Previous</small><p>Families, jobs, farms, stockpiles, building construction, discoveries and village growth.</p></div>
   <div class="updateItem"><b>V2.1 — Camera Fix</b><small>Foundation</small><p>Unified Retina camera transform, stable terrain edges and aligned citizens.</p></div>`
 }
 function renderWorldTab(){
-  menuTitle.textContent="World";menuSubtitle.textContent="People, villages, history and settings";
+  menuTitle.textContent="World";menuSubtitle.textContent="Civilizations, kingdoms, people and history";
   menuSegments.classList.remove("hidden");
-  menuSegments.innerHTML=sectionButton("overview","Overview")+sectionButton("people","People")+sectionButton("families","Families")+sectionButton("village","Village")+sectionButton("creator","World Creator")+sectionButton("reset","Reset")+sectionButton("war","War")+sectionButton("history","History")+sectionButton("settings","Settings")+sectionButton("updates","Updates");
-  const pages={overview:worldOverviewHtml,people:peopleHtml,families:familyRegistryHtml,village:villageHtml,creator:worldCreatorHtml,reset:worldResetHtml,war:warHtml,history:historyHtml,settings:settingsHtml,updates:updatesHtml};menuBody.innerHTML=(pages[worldSection]||worldOverviewHtml)()
+  menuSegments.innerHTML=sectionButton("overview","Overview")+sectionButton("civs","Civilizations")+sectionButton("people","People")+sectionButton("families","Families")+sectionButton("village","Settlement")+sectionButton("war","War")+sectionButton("history","History")+sectionButton("creator","World Creator")+sectionButton("reset","Reset")+sectionButton("settings","Settings")+sectionButton("updates","Updates");
+  const pages={overview:worldOverviewHtml,civs:civilizationsHtml,people:peopleHtml,families:familyRegistryHtml,village:villageHtml,war:warHtml,history:historyHtml,creator:worldCreatorHtml,reset:worldResetHtml,settings:settingsHtml,updates:updatesHtml};menuBody.innerHTML=(pages[worldSection]||worldOverviewHtml)()
 }
 function renderPowersTab(){
   menuTitle.textContent="God Powers";menuSubtitle.textContent=`Transform the ${resourceLayer==="surface"?"surface":"underground"}`;
@@ -1882,7 +2308,7 @@ function tileUndergroundCount(type){let n=0;for(let i=0;i<N;i++)if(underground[i
 function renderMainMenu(){if(mainTab==="world")renderWorldTab();else if(mainTab==="powers")renderPowersTab();else renderResourcesTab()}
 function chooseTool(id){tool=id;const under=["cave","ustone","uwater","magma","uiron","ugold","ucoal","crystal","reveal"].includes(id);activeLayer=under?"underground":"surface";resourceLayer=activeLayer;refreshToolChip();brushPanel.classList.add("hidden");closeMenu();showToast(`${(toolMeta[id]||["",id])[1]} selected · ${layerName()}`);updateUI()}
 
-function centerOnSettlement(){camX=settlement.x;camY=settlement.y;clampCamera();showToast("Centered on First Hearth")}
+function centerOnSettlement(){const s=settlementById(selectedSettlementId)||settlement;camX=s.x;camY=s.y;clampCamera();showToast(`Centered on ${s.name}`)}
 
 canvas.addEventListener("pointerdown",e=>{canvas.setPointerCapture(e.pointerId);pointers.set(e.pointerId,canvasPoint(e));if(pointers.size===1){const p=canvasPoint(e);last=p;dragging=false;const w=screenToWorld(p.x,p.y);if(tool!=="inspect")applyTool(w.x,w.y,true)}else if(pointers.size===2){const a=[...pointers.values()];pinchStart={d:Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y),z:zoom}}});
 canvas.addEventListener("pointermove",e=>{const p=canvasPoint(e);if(pointers.has(e.pointerId))pointers.set(e.pointerId,p);if(pointers.size===2&&pinchStart){const a=[...pointers.values()],d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);zoom=clamp(pinchStart.z*(d/pinchStart.d),2,10);clampCamera();return}if(!pointers.has(e.pointerId)||pointers.size!==1)return;const dx=p.x-last.x,dy=p.y-last.y;if(Math.abs(dx)+Math.abs(dy)>2)dragging=true;if(tool==="inspect"){const s=cameraScale();camX-=dx/s;camY-=dy/s;clampCamera()}else if(Date.now()-paintStamp>24){const w=screenToWorld(p.x,p.y);applyTool(w.x,w.y,true);paintStamp=Date.now()}last=p});
@@ -1905,6 +2331,7 @@ menuBody.addEventListener("input",e=>{
 menuBody.addEventListener("click",e=>{
   const sizeBtn=e.target.closest("[data-world-size]");if(sizeBtn){worldConfig.worldSize=Number(sizeBtn.dataset.worldSize);saveWorldConfig();renderMainMenu();return}
   const toolBtn=e.target.closest("[data-tool-select]");if(toolBtn){chooseTool(toolBtn.dataset.toolSelect);return}
+  const settlementBtn=e.target.closest("[data-settlement]");if(settlementBtn){const s=settlementById(Number(settlementBtn.dataset.settlement));if(s){selectedSettlementId=s.id;camX=s.x;camY=s.y;clampCamera();worldSection="village";renderMainMenu();showToast(s.name)}return}
   const personBtn=e.target.closest("[data-person]");if(personBtn){const p=people.find(q=>q.id===Number(personBtn.dataset.person));if(p){closeMenu();showCitizen(p);camX=p.x;camY=p.y;clampCamera()}return}
   const settingBtn=e.target.closest("[data-setting]");if(settingBtn){const k=settingBtn.dataset.setting;settings[k]=!settings[k];saveSettings();renderMainMenu();return}
   const action=e.target.closest("[data-action]");if(!action)return;

@@ -1,7 +1,7 @@
 {
   "name": "Tiny World",
   "short_name": "Tiny World",
-  "description": "Tiny World V8.3 adds naturally generated shallow-water shelves and shoreline-oriented animated surf instead of open-ocean stripe waves.",
+  "description": "Tiny World V9: multiple settlements, real citizen leaders, territories, diplomacy, trade routes, kingdoms, armies, wars, refugees, migration and political world history.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
