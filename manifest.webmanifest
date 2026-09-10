@@ -1,7 +1,7 @@
 {
   "name": "Tiny World",
   "short_name": "Tiny World",
-  "description": "Tiny World V7 delivers a premium art pass with softer painterly terrain, stronger shoreline animation, refined buildings, and upgraded tiny people and animals.",
+  "description": "Tiny World V7.1 adds a stronger brushed terrain pass, more organic forests, and more dynamic animated water.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

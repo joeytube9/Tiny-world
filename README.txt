@@ -1,17 +1,16 @@
-Tiny World V7 — PREMIUM ART PASS
+Tiny World V7.1 — BRUSHED WORLD PASS
 
-V7 focuses on making Tiny World feel far more polished and premium.
+This pass pushes the art direction further toward a premium painted look.
 
-ART CHANGES
-- Added a painterly land overlay so terrain reads less like hard blocks and more like a brushed surface.
-- Coastlines now feel softer and more organic.
-- Added a livelier shallow-water fringe around land so shore water grows and recedes.
-- Strengthened visible wave and foam motion.
-- Upgraded huts, farms and settlement props.
-- Upgraded tiny villager sprites.
-- Upgraded tiny animal sprites.
-- Food continues to read more like natural berry bushes.
+WHAT CHANGED
+- Stronger painterly terrain overlay to hide hard tile edges.
+- Bigger brushed land dabs so terrain reads less block-by-block.
+- More organic forest canopies.
+- Improved individual tree art.
+- More animated shoreline surf.
+- Stronger wave motion across water.
+- Slight terrain texture density increase.
 
 NOTES
-- The simulation remains tile-based underneath, but V7 works much harder to hide the grid visually.
-- If Safari or the home-screen app shows the older build after deploy, clear cached site data once.
+- The simulation is still tile based underneath, but V7.1 hides the grid more aggressively.
+- If your browser still shows the older build after deploy, clear cached site data once.
