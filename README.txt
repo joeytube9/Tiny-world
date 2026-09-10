@@ -1,57 +1,45 @@
-Tiny World V10.0 — CULTURE, FAITH & ECONOMY
+Tiny World V10.0.1 — PERFORMANCE CORE
 
-V10.0 is the first V10 rollout build.
+This is a dedicated optimization release. It intentionally does not add the
+next V10 culture/religion expansion yet.
 
-CULTURE
-- Every settlement belongs to a real culture.
-- Cultures have values, customs, festivals, prestige and historical heroes.
-- Daughter settlements inherit culture and can diverge after enough time/distance/rivalry.
-- Citizens personally carry culture, so migrants and refugees preserve identity.
-- Shared culture and shared values now affect diplomacy.
+MAIN PERFORMANCE CHANGES
 
-FAITH
-- Citizens have individual belief percentages and stances:
-  Skeptic, Doubtful, Questioning, Believer, Devout.
-- God Powers feed a divine-history system.
-- Rain/healing/blessing/growth can build a merciful or protective interpretation.
-- Fire/lightning/lava/drought can create fear and a wrathful interpretation.
-- Civilizations independently perceive the Creator.
-- Organized religions can emerge.
-- Actual citizens become prophets and priests.
-- Religions have doctrine, themes, prestige and followers.
-- Trade can spread religion.
-- Distant hostile branches can schism.
-- Major divine moments can become holy sites.
-- Shrines and temples are built by religious settlements.
+AI / SIMULATION
+- Cached food, tree, ore and water targets so workers do not rescan large
+  sections of the map every simulation tick.
+- Cached danger checks.
+- Social AI searches the local settlement rather than every citizen in the world.
+- Person/building/settlement data is indexed and reused.
+- Rewrote job assignment to avoid the old repeated best-person/best-job search.
+- Partner matching is grouped by settlement.
+- Emotional updates are distributed across citizens rather than firing all at once.
+- Relationships, jobs, village planning, politics, expansion, culture, faith and
+  economy updates are intentionally scheduled on different frames.
+- Removed duplicate V10 updates from the political update.
 
-ECONOMY
-- Settlement markets calculate scarcity-based prices.
-- Work pays personal wealth.
-- Citizens develop economic/social classes.
-- Markets can be constructed.
-- Trade-connected mature settlements can move from Barter to Coinage.
-- Each coinage economy generates its own currency name.
-- Actual citizens can become merchants.
-- Merchants physically travel land-connected trade routes and earn profit.
+MAJOR SPIKE FIX
+- Ordinary food/tree regrowth used to set the entire terrain renderer dirty.
+- On a large world that could trigger a multi-million-pixel terrain rebuild even
+  though terrain had not changed.
+- V10.0.1 removes that unnecessary rebuild.
 
-ATLAS
-- Political mode.
-- Culture mode.
-- Faith mode.
-- Economy mode.
+RENDERING
+- Adaptive detail based on visible world area and real frame time.
+- Large zoomed-out views render fewer decorative samples while keeping the
+  underlying world simulation completely intact.
+- People, animals and buildings are culled to the visible camera region.
+- Static building draw order is cached.
+- Atlas/minimap refresh is throttled.
+- HUD updates are throttled during simulation.
+- Dynamic particle budget.
+- Reduced offscreen terrain texture memory, especially for 300×300 and 500×500 worlds.
 
-CITIZENS
-- Inspector now shows culture, faith, belief, religious role, class and economic role.
-- Children inherit cultural/religious influence and blended belief.
+AUTO PERFORMANCE
+- Enabled by default.
+- Found under World → Settings.
+- It only adjusts decorative rendering density. It does NOT remove citizens,
+  simplify AI history, disable wars, delete culture/religion data or change world size.
+- It automatically returns toward full detail when frame time improves.
 
-NEW BUILDINGS
-- Market
-- Shrine
-- Temple
-
-V10.0 is the foundation. Future V10.x passes can deepen class politics,
-ownership, manufactured goods, law/crime, cultural architecture,
-religious denominations and historical interpretation.
-
-All V9 politics/kingdoms/wars, V8 painterly graphics, V6 living citizens,
-families/marriage, underground systems and God Powers remain.
+All V10.0 gameplay remains.

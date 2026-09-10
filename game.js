@@ -67,11 +67,83 @@ let activeLayer="surface",resourceLayer="surface",undergroundDirty=true;
 const defaultWorldConfig={seed:"random",worldSize:200,landmass:50,water:50,forest:52,mountains:42,wildlife:50,startPopulation:6,startingFood:18,startingWood:8};
 let worldConfig=Object.assign({},defaultWorldConfig);
 let lastGeneratedConfig=Object.assign({},defaultWorldConfig);
-let settings={labels:true,trails:true,dayNight:true,effects:true};try{settings=Object.assign(settings,JSON.parse(localStorage.getItem("tinyWorldSettings")||"{}"))}catch(e){}try{worldConfig=Object.assign(worldConfig,JSON.parse(localStorage.getItem("tinyWorldConfig")||"{}"))}catch(e){}
+let settings={labels:true,trails:true,dayNight:true,effects:true,autoPerformance:true};try{settings=Object.assign(settings,JSON.parse(localStorage.getItem("tinyWorldSettings")||"{}"))}catch(e){}try{worldConfig=Object.assign(worldConfig,JSON.parse(localStorage.getItem("tinyWorldConfig")||"{}"))}catch(e){}
 
+
+const EMPTY_LIST=[];
+let worldIndexDirty=true,buildingOrderDirty=true;
+let personIndex=new Map(),buildingIndex=new Map(),alivePeopleCache=[];
+let allPeopleBySettlement=new Map(),alivePeopleBySettlement=new Map(),allBuildingsBySettlement=new Map(),completeBuildingsBySettlement=new Map();
+let sortedBuildingsCache=[],lastUiRefreshMs=-9999,lastMiniMapRefreshMs=-9999;
+const perfState={avgMs:16.7,lastFrameMs:0,detail:1,quality:"Full",slowFrames:0,fastFrames:0};
+
+function invalidateWorldIndex(){worldIndexDirty=true}
+function invalidateBuildingOrder(){buildingOrderDirty=true}
+function rebuildWorldIndex(){
+  personIndex=new Map();buildingIndex=new Map();alivePeopleCache=[];
+  allPeopleBySettlement=new Map();alivePeopleBySettlement=new Map();
+  allBuildingsBySettlement=new Map();completeBuildingsBySettlement=new Map();
+  for(const s of settlements){
+    allPeopleBySettlement.set(s.id,[]);alivePeopleBySettlement.set(s.id,[]);
+    allBuildingsBySettlement.set(s.id,[]);completeBuildingsBySettlement.set(s.id,[])
+  }
+  for(const p of people){
+    personIndex.set(p.id,p);
+    if(!allPeopleBySettlement.has(p.settlementId))allPeopleBySettlement.set(p.settlementId,[]);
+    allPeopleBySettlement.get(p.settlementId).push(p);
+    if(p.alive){
+      alivePeopleCache.push(p);
+      if(!alivePeopleBySettlement.has(p.settlementId))alivePeopleBySettlement.set(p.settlementId,[]);
+      alivePeopleBySettlement.get(p.settlementId).push(p)
+    }
+  }
+  for(const b of buildings){
+    buildingIndex.set(b.id,b);
+    if(!allBuildingsBySettlement.has(b.settlementId))allBuildingsBySettlement.set(b.settlementId,[]);
+    allBuildingsBySettlement.get(b.settlementId).push(b);
+    if(b.complete){
+      if(!completeBuildingsBySettlement.has(b.settlementId))completeBuildingsBySettlement.set(b.settlementId,[]);
+      completeBuildingsBySettlement.get(b.settlementId).push(b)
+    }
+  }
+  worldIndexDirty=false
+}
+function ensureWorldIndex(){if(worldIndexDirty)rebuildWorldIndex()}
+function personById(id){ensureWorldIndex();return personIndex.get(Number(id))||null}
+function buildingById(id){ensureWorldIndex();return buildingIndex.get(Number(id))||null}
+function alivePeople(){ensureWorldIndex();return alivePeopleCache}
+function alivePopulation(){ensureWorldIndex();return alivePeopleCache.length}
+function getSortedBuildings(){
+  if(buildingOrderDirty){sortedBuildingsCache=[...buildings].sort((a,b)=>a.y-b.y);buildingOrderDirty=false}
+  return sortedBuildingsCache
+}
+function adaptiveStep(bounds,base=1,target=18000){
+  const area=Math.max(1,(bounds.r-bounds.l)*(bounds.b-bounds.t));
+  const pressure=settings.autoPerformance?perfState.detail:1;
+  const areaStep=Math.ceil(Math.sqrt(area/Math.max(2600,target/pressure)));
+  return clamp(Math.max(base,areaStep),1,7)
+}
+function updatePerformanceClock(now){
+  if(!perfState.lastFrameMs){perfState.lastFrameMs=now;return}
+  const dt=clamp(now-perfState.lastFrameMs,4,120);perfState.lastFrameMs=now;
+  perfState.avgMs=lerp(perfState.avgMs,dt,.055);
+  if(!settings.autoPerformance){perfState.detail=1;perfState.quality="Full";return}
+  if(perfState.avgMs>30){
+    perfState.slowFrames++;perfState.fastFrames=0;
+    if(perfState.slowFrames>18){perfState.detail=clamp(perfState.detail+.18,1,2.8);perfState.slowFrames=0}
+  }else if(perfState.avgMs<20.5){
+    perfState.fastFrames++;perfState.slowFrames=0;
+    if(perfState.fastFrames>80){perfState.detail=clamp(perfState.detail-.10,1,2.8);perfState.fastFrames=0}
+  }else{
+    perfState.slowFrames=Math.max(0,perfState.slowFrames-1);
+    perfState.fastFrames=Math.max(0,perfState.fastFrames-1)
+  }
+  perfState.quality=perfState.detail<1.18?"Full":perfState.detail<1.65?"Balanced":"Performance"
+}
+function performanceLabel(){return `${perfState.quality} · ${Math.round(1000/Math.max(1,perfState.avgMs))} fps est.`}
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),idx=(x,y)=>y*WORLD_W+x,rnd=(a,b)=>a+Math.random()*(b-a),rndi=(a,b)=>Math.floor(rnd(a,b+1)),lerp=(a,b,t)=>a+(b-a)*t;
 function mixColor(a,b,t){return[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t]}
-function textureScaleForWorld(size){return size<=100?8:size<=150?8:size<=200?7:size<=300?6:4}
+function textureScaleForWorld(size){return size<=100?7:size<=150?7:size<=200?6:size<=300?4:3}
 function shorelineVector(x,y,wantWater){let ox=0,oy=0,c=0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;const nx=x+dx,ny=y+dy;if(nx<0||ny<0||nx>=WORLD_W||ny>=WORLD_H)continue;const nt=terrain[idx(nx,ny)];if(wantWater?isWaterTile(nt):isLandTile(nt)){ox+=dx;oy+=dy;c++}}return c?{x:ox/c,y:oy/c,count:c}:{x:0,y:0,count:0}}
 function isWaterTile(t){return t===T.WATER||t===T.DEEP}
 function isLandTile(t){return !isWaterTile(t)}
@@ -439,8 +511,14 @@ function updateV10Systems(){updateCultures();updateReligions();updateEconomy()}
 function settlementById(id){return settlements.find(s=>s.id===Number(id))||null}
 function kingdomById(id){return kingdoms.find(k=>k.id===Number(id))||null}
 function citizenSettlement(p){return settlementById(p?.settlementId)||settlement}
-function settlementPeople(s,aliveOnly=true){return people.filter(p=>(!aliveOnly||p.alive)&&p.settlementId===s.id)}
-function settlementBuildings(s,completeOnly=false){return buildings.filter(b=>(!completeOnly||b.complete)&&b.settlementId===s.id)}
+function settlementPeople(s,aliveOnly=true){
+  if(!s)return EMPTY_LIST;ensureWorldIndex();
+  return (aliveOnly?alivePeopleBySettlement:allPeopleBySettlement).get(s.id)||EMPTY_LIST
+}
+function settlementBuildings(s,completeOnly=false){
+  if(!s)return EMPTY_LIST;ensureWorldIndex();
+  return (completeOnly?completeBuildingsBySettlement:allBuildingsBySettlement).get(s.id)||EMPTY_LIST
+}
 function settlementPopulation(s){return settlementPeople(s,true).length}
 function settlementRadius(s){
   const pop=settlementPopulation(s),built=settlementBuildings(s,true).length;
@@ -479,7 +557,7 @@ function createSettlement(name,x,y,founders=[],parentId=null){
     if(old&&old.id!==s.id)p.citizenshipHistory.unshift(`${old.name} → ${s.name}`);
     p.settlementId=s.id;p.homeId=null;p.refugee=false;if(!p.cultureId)p.cultureId=s.cultureId;if(!p.religionId&&s.religionId)p.religionId=s.religionId
   }
-  chooseLeader(s,true);return s
+  invalidateWorldIndex();chooseLeader(s,true);return s
 }
 function leaderScore(p){
   return (p.reputation||0)*1.4+(p.traits?.social||.5)*25+(p.traits?.bravery||.5)*18+(p.education||0)*.22+Math.min(p.age,60)*.18+(p.wealth||0)*.08
@@ -528,7 +606,7 @@ function createKingdom(capital,members=[capital]){
   return k
 }
 function settlementKingdom(s){return s?.kingdomId?kingdomById(s.kingdomId):null}
-function kingdomRuler(k){if(!k)return null;return people.find(p=>p.id===k.rulerId&&p.alive)||settlementLeader(settlementById(k.capitalId))}
+function kingdomRuler(k){const p=personById(k?.rulerId);return p?.alive?p:settlementLeader(settlementById(k?.capitalId))}
 function militaryStrength(s){
   const adults=settlementPeople(s,true).filter(p=>p.age>=16&&p.age<70);
   const courage=adults.reduce((a,p)=>a+(p.traits?.bravery||.5),0);
@@ -736,13 +814,17 @@ function updateRefugees(){
       p.x=dest.x+rndi(-3,3);p.y=dest.y+rndi(-3,3);p.px=p.x;p.py=p.y;
       memoryAdd(p,`Fled ${s.name} for ${dest.name}`)
     }
-    addEvent(`${group.length} people fled ${s.name} and sought refuge in ${dest.name}.`,"refugees");
+    invalidateWorldIndex();addEvent(`${group.length} people fled ${s.name} and sought refuge in ${dest.name}.`,"refugees");
     assignHomes()
   }
 }
 function updatePoliticalWorld(){
-  for(const s of settlements){settlementRadius(s);if(!settlementLeader(s)||day-(s.lastElectionDay||0)>28)chooseLeader(s);const pop=settlementPopulation(s);s.prosperity=clamp(45+(s.food-pop)*1.1+(s.wood||0)*.25+(s.gold||0)*.8-(s.warWeariness||0)*.35,0,100)}
-  updateTrade();updateDiplomacy();maybeFormKingdoms();updateWars();updateRefugees();updateV10Systems()
+  ensureWorldIndex();
+  for(const s of settlements){
+    settlementRadius(s);if(!settlementLeader(s)||day-(s.lastElectionDay||0)>28)chooseLeader(s);
+    const pop=settlementPopulation(s);s.prosperity=clamp(45+(s.food-pop)*1.1+(s.wood||0)*.25+(s.gold||0)*.8-(s.warWeariness||0)*.35,0,100)
+  }
+  updateTrade();updateDiplomacy();maybeFormKingdoms();updateWars();updateRefugees()
 }
 function colorFor(t,x,y,i){
   const h=height[i],m=moisture[i],shore=shorelineFactor(x,y);
@@ -899,7 +981,12 @@ function visibleBounds(pad=6){const v=viewportWorldSize();return{l:camX-v.w/2-pa
 
 function brushNoise(x,y,cx,cy,r){return Math.hypot(x-cx,y-cy)/r+(hash(x,y,(tick>>3)%37)-.5)*.38}
 function spawnCloud(x,y,r){clouds.push({x,y,r:Math.max(8,r*.9),life:330,phase:rnd(0,Math.PI*2)})}
-function spawnParticles(type,x,y,count=10){for(let i=0;i<count;i++)particles.push({type,x:x+rnd(-1.3,1.3),y:y+rnd(-1.2,1.2),vx:rnd(-.08,.08),vy:rnd(-.18,.03),life:rndi(10,30)})}
+function spawnParticles(type,x,y,count=10){
+  const maxParticles=settings.autoPerformance?(perfState.detail>1.65?180:perfState.detail>1.2?280:420):500;
+  if(particles.length>=maxParticles)return;
+  const allowed=Math.min(count,maxParticles-particles.length);
+  for(let i=0;i<allowed;i++)particles.push({type,x:x+rnd(-1.3,1.3),y:y+rnd(-1.2,1.2),vx:rnd(-.08,.08),vy:rnd(-.18,.03),life:rndi(10,30)})
+}
 function spawnLightningStrike(x,y){
   visualEffects.push({type:"lightning",x,y,start:visualTime,duration:.42,seed:Math.random()*10000})
 }
@@ -1104,8 +1191,7 @@ function rewardWork(p,amount=.08){
 function bestRelationFor(p,positive=true){
   let best=null,bestValue=positive?-999:999;
   for(const [id,v0] of Object.entries(p.relations||{})){
-    const q=people.find(x=>x.id===Number(id)&&x.alive);
-    if(!q)continue;
+    const q=personById(id);if(!q||!q.alive)continue;
     const v=Number(v0)||0;
     if((positive&&v>bestValue)||(!positive&&v<bestValue)){best=q;bestValue=v}
   }
@@ -1115,7 +1201,7 @@ function householdMembers(p){
   if(!p.homeId)return [];
   return people.filter(q=>q.alive&&q.homeId===p.homeId)
 }
-function homeFor(p){return p.homeId?buildings.find(b=>b.id===p.homeId&&b.complete):null}
+function homeFor(p){return p.homeId?buildingById(p.homeId):null}
 function assignHomes(){
   for(const s of settlements.length?settlements:[settlement]){
     if(!s)continue;
@@ -1208,7 +1294,7 @@ function teachChild(p){
   return true
 }
 function updateEmotionalLife(p){
-  const home=homeFor(p),partner=p.partner?people.find(q=>q.id===p.partner&&q.alive):null;
+  const home=homeFor(p),partner=p.partner?personById(p.partner):null;
   const best=bestRelationFor(p,true),rival=bestRelationFor(p,false);
   p.bestFriendId=best&&best.value>=25?best.person.id:null;
   p.rivalId=rival&&rival.value<=-18?rival.person.id:null;
@@ -1227,7 +1313,7 @@ function updateEmotionalLife(p){
 }
 function handleDeath(p,cause="natural causes"){
   if(!p||!p.alive)return;
-  p.alive=false;p.causeOfDeath=cause;p.deathDay=Math.floor(day);
+  p.alive=false;p.causeOfDeath=cause;p.deathDay=Math.floor(day);invalidateWorldIndex();
   const deathSettlement=citizenSettlement(p);if(deathSettlement)deathSettlement.deaths++;
   const age=Math.floor(p.age);
   const partner=p.partner?people.find(q=>q.id===p.partner&&q.alive):null;
@@ -1261,8 +1347,9 @@ function updateAging(p){
   return p.alive
 }
 function livingCivUpdate(){
-  assignHomes();
-  for(const p of people.filter(q=>q.alive))updateEmotionalLife(p)
+  assignHomes();ensureWorldIndex();
+  const phase=Math.floor(tick/160)%4;
+  for(const p of alivePeopleCache)if((p.id&3)===phase)updateEmotionalLife(p)
 }
 
 function makePerson(name,x,y,sex,age,parents=[]){
@@ -1338,7 +1425,7 @@ function moveCritterToward(c,t){
 function addBuilding(type,x,y,complete=true,settlementId=null){
   const sid=settlementId??settlement?.id??1;
   const b={id:nextBuildingId++,type,x,y,complete,progress:complete?100:0,age:0,smoke:rnd(0,6.28),crop:0,harvest:0,settlementId:sid};
-  buildings.push(b);return b
+  buildings.push(b);invalidateWorldIndex();invalidateBuildingOrder();return b
 }
 function buildingsOf(type,completeOnly=true,sid=null){
   return buildings.filter(b=>b.type===type&&(!completeOnly||b.complete)&&(sid==null||b.settlementId===sid))
@@ -1359,6 +1446,16 @@ function passable(x,y){if(x<1||y<1||x>=WORLD_W-1||y>=WORLD_H-1)return false;cons
 function recordTrail(x,y){if(x<0||y<0||x>=WORLD_W||y>=WORLD_H)return;const i=idx(x,y);if(passable(x,y))trail[i]=clamp(trail[i]+1,0,255)}
 function moveTo(p,nx,ny){if(passable(nx,ny)){p.dir=nx>=p.x?1:-1;p.x=nx;p.y=ny;recordTrail(nx,ny);return true}return false}
 function wander(p){const d=[[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1],[0,0]][rndi(0,8)];moveTo(p,p.x+d[0],p.y+d[1])}
+function cachedNearestTile(p,key,fn,max=42,ttl=32){
+  p._tileTargets=p._tileTargets||{};
+  const c=p._tileTargets[key];
+  if(c&&tick<=c.until&&c.x>=0&&c.y>=0&&c.x<WORLD_W&&c.y<WORLD_H&&fn(idx(c.x,c.y),c.x,c.y))return c;
+  const target=nearestTile(p,fn,max);
+  if(target)p._tileTargets[key]={x:target.x,y:target.y,until:tick+ttl};
+  else delete p._tileTargets[key];
+  return target
+}
+function clearCachedTile(p,key){if(p._tileTargets)delete p._tileTargets[key]}
 function nearestTile(p,fn,max=42){let best=null,bd=1e9;for(let y=Math.max(0,p.y-max);y<=Math.min(WORLD_H-1,p.y+max);y+=2)for(let x=Math.max(0,p.x-max);x<=Math.min(WORLD_W-1,p.x+max);x+=2){const d=Math.abs(x-p.x)+Math.abs(y-p.y);if(d<bd&&fn(idx(x,y),x,y)){bd=d;best={x,y}}}return best}
 function moveToward(p,t){if(!t){wander(p);return}const dx=Math.sign(t.x-p.x),dy=Math.sign(t.y-p.y),opts=[];if(dx&&passable(p.x+dx,p.y))opts.push([p.x+dx,p.y]);if(dy&&passable(p.x,p.y+dy))opts.push([p.x,p.y+dy]);if(dx&&dy&&passable(p.x+dx,p.y+dy))opts.push([p.x+dx,p.y+dy]);if(opts.length){const q=opts[rndi(0,opts.length-1)];moveTo(p,q[0],q[1])}else wander(p)}
 function nearWater(p){for(let y=p.y-2;y<=p.y+2;y++)for(let x=p.x-2;x<=p.x+2;x++){if(x<0||y<0||x>=WORLD_W||y>=WORLD_H)continue;const t=terrain[idx(x,y)];if(t===T.WATER||t===T.DEEP)return true}return false}
@@ -1380,18 +1477,23 @@ function aiChooseLongGoal(p){
   return `Help ${citizenSettlement(p)?.name||"the settlement"} prosper`
 }
 function aiDangerNear(p){
+  if(p._dangerUntil&&tick<p._dangerUntil)return p._dangerCache||0;
   let danger=0;
   const pi=idx(clamp(Math.round(p.x),0,WORLD_W-1),clamp(Math.round(p.y),0,WORLD_H-1));
   if(p.layer!=="underground"&&(terrain[pi]===T.LAVA||burn[pi]>100))danger+=3;
   if(p.layer==="underground"&&underground[pi]===U.MAGMA)danger+=4;
-  for(const c of critters)if(c.alive&&c.type==="wolf"&&Math.hypot(c.x-p.x,c.y-p.y)<5)danger+=1;
-  return danger
+  for(const c of critters){
+    if(!c.alive||c.type!=="wolf")continue;
+    const dx=c.x-p.x,dy=c.y-p.y;
+    if(Math.abs(dx)<6&&Math.abs(dy)<6&&Math.hypot(dx,dy)<5)danger+=1
+  }
+  p._dangerCache=danger;p._dangerUntil=tick+8+(p.id%5);return danger
 }
 function aiUpdateMind(p){
   if(!p.alive)return;
   p.socialNeed=clamp((p.socialNeed||0)+.006,0,100);
   p.stress=clamp((p.stress||0)+(p.hunger>70?.012:0)+(p.thirst>70?.014:0)+(p.health<55?.018:0)+(p.grief||0)*.0007-.003,0,100);
-  if(tick%190===0)updateEmotionalLife(p);
+  if((tick+p.id*17)%640===0)updateEmotionalLife(p);
   if(!p.longGoal||tick-p.lastDecision>900){p.longGoal=choosePersonalGoal(p)}
   const danger=aiDangerNear(p);
   if(danger>0){p.mood="Alarmed";p.decisionReason="Avoiding nearby danger";p.stress=clamp(p.stress+.18,0,100)}
@@ -1405,9 +1507,18 @@ function aiUpdateMind(p){
 function aiSocialize(p){
   if(p.age<10||p.socialNeed<72||p.layer==="underground")return false;
   let friend=null,bd=8;
-  const romantic=p.partner?people.find(q=>q.id===p.partner&&q.alive&&q.layer!=="underground"):null;
-  if(romantic&&Math.hypot(romantic.x-p.x,romantic.y-p.y)<10){friend=romantic;bd=Math.hypot(romantic.x-p.x,romantic.y-p.y)}
-  else for(const q of people){if(!q.alive||q.id===p.id||q.layer==="underground"||q.settlementId!==p.settlementId)continue;const d=Math.hypot(q.x-p.x,q.y-p.y);if(d<bd){bd=d;friend=q}}
+  const romantic=p.partner?personById(p.partner):null;
+  if(romantic?.alive&&romantic.layer!=="underground"&&Math.hypot(romantic.x-p.x,romantic.y-p.y)<10){
+    friend=romantic;bd=Math.hypot(romantic.x-p.x,romantic.y-p.y)
+  }else{
+    const local=settlementPeople(citizenSettlement(p),true);
+    for(const q of local){
+      if(q.id===p.id||q.layer==="underground")continue;
+      const dx=q.x-p.x,dy=q.y-p.y;
+      if(Math.abs(dx)>8||Math.abs(dy)>8)continue;
+      const d=Math.hypot(dx,dy);if(d<bd){bd=d;friend=q}
+    }
+  }
   if(!friend)return false;
   p.goal=`Talk with ${friend.name}`;
   if(bd>1.6){moveToward(p,friend);return true}
@@ -1417,13 +1528,11 @@ function aiSocialize(p){
   if(Math.random()<conflictChance){
     p.relations[friend.id]=clamp(Number(p.relations[friend.id]||0)-rnd(2,5),-100,100);
     friend.relations=friend.relations||{};friend.relations[p.id]=clamp(Number(friend.relations[p.id]||0)-rnd(2,5),-100,100);
-    p.mood="Irritated";friend.mood="Irritated";
-    memoryAdd(p,`Argued with ${friend.name}`);memoryAdd(friend,`Argued with ${p.name}`)
+    p.mood="Irritated";friend.mood="Irritated";memoryAdd(p,`Argued with ${friend.name}`);memoryAdd(friend,`Argued with ${p.name}`)
   }else{
     p.relations[friend.id]=clamp(Number(p.relations[friend.id]||0)+partnerGain,-100,100);
     friend.relations=friend.relations||{};friend.relations[p.id]=clamp(Number(friend.relations[p.id]||0)+partnerGain,-100,100);
-    p.mood="Connected";
-    if(Math.random()<.025)memoryAdd(p,`Shared time with ${friend.name}`)
+    p.mood="Connected";if(Math.random()<.025)memoryAdd(p,`Shared time with ${friend.name}`)
   }
   return true
 }
@@ -1440,8 +1549,7 @@ function assignJobs(){
   const groups=settlements.length?settlements:[settlement];
   for(const s of groups){
     if(!s)continue;
-    const adults=settlementPeople(s,true).filter(p=>p.age>=14&&p.layer!=="underground");
-    if(!adults.length)continue;
+    const adults=settlementPeople(s,true).filter(p=>p.age>=14&&p.layer!=="underground");if(!adults.length)continue;
     const localBuildings=settlementBuildings(s,false),pending=localBuildings.filter(b=>!b.complete),farms=localBuildings.filter(b=>b.complete&&b.type==="farm");
     const desired={
       Builder:pending.length?Math.max(1,Math.ceil(adults.length*.14)):0,
@@ -1451,18 +1559,23 @@ function assignJobs(){
       Gatherer:(s.food||0)<20?Math.max(1,Math.ceil(adults.length*.26)):Math.max(1,Math.ceil(adults.length*.14)),
       Hauler:Math.max(0,Math.ceil(adults.length*.10))
     };
-    let slots=[];for(const [job,n] of Object.entries(desired))for(let i=0;i<n;i++)slots.push(job);
-    while(slots.length<adults.length)slots.push(Math.random()<.55?"Gatherer":"Hauler");
-    const unassigned=[...adults];
-    while(slots.length&&unassigned.length){
-      let bestP=null,bestJob=null,bestScore=-999,bestPi=-1,bestSi=-1;
-      for(let pi=0;pi<unassigned.length;pi++)for(let si=0;si<slots.length;si++){
-        const p=unassigned[pi],job=slots[si];let score=jobAffinity(p,job);
-        if(day-(p.jobSince||0)<6&&p.job===job)score+=.18;if(p.militaryRole)score-=.10;
-        if(score>bestScore){bestScore=score;bestP=p;bestJob=job;bestPi=pi;bestSi=si}
-      }
-      if(!bestP)break;if(bestP.job!==bestJob)setCareer(bestP,bestJob,`Best fit for ${bestJob.toLowerCase()} work`);
-      unassigned.splice(bestPi,1);slots.splice(bestSi,1)
+    const remaining={...desired};let total=Object.values(remaining).reduce((a,b)=>a+b,0);
+    while(total<adults.length){remaining[Math.random()<.55?"Gatherer":"Hauler"]++;total++}
+    const jobs=Object.keys(remaining);
+    const ranked=adults.map(p=>{
+      const choices=jobs.map(job=>{
+        let score=jobAffinity(p,job);
+        if(day-(p.jobSince||0)<6&&p.job===job)score+=.18;
+        if(p.militaryRole)score-=.10;
+        return {job,score}
+      }).sort((a,b)=>b.score-a.score);
+      return {p,choices,best:choices[0]?.score||0}
+    }).sort((a,b)=>b.best-a.best);
+    for(const entry of ranked){
+      const choice=entry.choices.find(c=>(remaining[c.job]||0)>0);
+      const pick=choice?.job||"Gatherer";
+      remaining[pick]=Math.max(0,(remaining[pick]||0)-1);
+      if(entry.p.job!==pick)setCareer(entry.p,pick,`Best fit for ${pick.toLowerCase()} work`)
     }
   }
 }
@@ -1507,37 +1620,35 @@ function workMinerUnderground(p){
   p.carryAmount=1+(Math.random()<skillLevel(p,"Miner")/170?1:0);gainSkill(p,"Miner",.15);rewardWork(p,.07);underground[i]=U.CAVE;undergroundDirty=true;spawnParticles("stone",p.x,p.y,5);return true
 }
 function workPerson(p){const s=citizenSettlement(p);if(!s)return false;if(p.job==="Miner"&&buildingsOf("mine",true,p.settlementId).length)return workMinerUnderground(p);if(p.carryAmount>0&&p.carryType)return deliver(p);
-  if(p.job==="Builder"){const site=buildings.find(b=>!b.complete&&b.settlementId===p.settlementId);if(site){p.goal=`Build ${site.type}`;if(!atTarget(p,site,1.6)){moveToward(p,site);return true}site.progress+=1.35*workEfficiency(p,"Builder");gainSkill(p,"Builder",.10);rewardWork(p,.035);spawnParticles("dust",site.x,site.y,2);if(site.progress>=100){site.progress=100;site.complete=true;addEvent(`${p.name} completed the ${site.type}.`,"building");if(site.type==="hut"){discover("Shelter",`${s.name} mastered permanent shelter.`,s);assignHomes()}if(site.type==="stockpile")discover("Storage",`${s.name} established shared storage.`,s);if(site.type==="farm")discover("Agriculture",`${s.name} prepared its first permanent fields.`,s);if(site.type==="granary")discover("Granaries",`${s.name} completed a granary to protect its harvest.`,s);if(site.type==="mine"){discover("Mining",`${s.name} opened its first mine shaft.`,s);openMineShaft(site)}}return true}}
+  if(p.job==="Builder"){const site=buildings.find(b=>!b.complete&&b.settlementId===p.settlementId);if(site){p.goal=`Build ${site.type}`;if(!atTarget(p,site,1.6)){moveToward(p,site);return true}site.progress+=1.35*workEfficiency(p,"Builder");gainSkill(p,"Builder",.10);rewardWork(p,.035);spawnParticles("dust",site.x,site.y,2);if(site.progress>=100){site.progress=100;site.complete=true;invalidateWorldIndex();addEvent(`${p.name} completed the ${site.type}.`,"building");if(site.type==="hut"){discover("Shelter",`${s.name} mastered permanent shelter.`,s);assignHomes()}if(site.type==="stockpile")discover("Storage",`${s.name} established shared storage.`,s);if(site.type==="farm")discover("Agriculture",`${s.name} prepared its first permanent fields.`,s);if(site.type==="granary")discover("Granaries",`${s.name} completed a granary to protect its harvest.`,s);if(site.type==="mine"){discover("Mining",`${s.name} opened its first mine shaft.`,s);openMineShaft(site)}}return true}}
   if(p.job==="Farmer"){const f=findFarmWork(p);if(f){p.goal="Tend fields";if(!atTarget(p,f,2)){moveToward(p,f);return true}if(f.crop>=100){p.carryType="food";p.carryAmount=5+Math.floor(skillLevel(p,"Farmer")/35);f.crop=8;gainSkill(p,"Farmer",.18);rewardWork(p,.06);spawnParticles("grain",f.x,f.y,8);return true}if(f.crop<15)f.crop=18;gainSkill(p,"Farmer",.035);return true}}
-  if(p.job==="Miner"){const target=nearestTile(p,(i)=>rocks[i]>0||iron[i]>0||gold[i]>0,34);if(target){p.goal="Mine minerals";if(!atTarget(p,target,1)){moveToward(p,target);return true}const i=idx(target.x,target.y);if(gold[i]>0){gold[i]--;p.carryType="gold"}else if(iron[i]>0){iron[i]--;p.carryType="iron"}else{rocks[i]--;p.carryType="stone"}p.carryAmount=1+(Math.random()<skillLevel(p,"Miner")/180?1:0);gainSkill(p,"Miner",.14);rewardWork(p,.06);spawnParticles("stone",p.x,p.y,5);return true}}
-  if(p.job==="Woodcutter"){const target=nearestTile(p,(i)=>trees[i]>0,34);if(target){p.goal="Cut wood";if(!atTarget(p,target,1)){moveToward(p,target);return true}const i=idx(target.x,target.y);trees[i]--;p.carryType="wood";p.carryAmount=1+(Math.random()<skillLevel(p,"Woodcutter")/150?1:0);gainSkill(p,"Woodcutter",.13);rewardWork(p,.045);spawnParticles("leaf",p.x,p.y,6);return true}}
+  if(p.job==="Miner"){const target=cachedNearestTile(p,"surfaceMine",(i)=>rocks[i]>0||iron[i]>0||gold[i]>0,34,30);if(target){p.goal="Mine minerals";if(!atTarget(p,target,1)){moveToward(p,target);return true}const i=idx(target.x,target.y);if(gold[i]>0){gold[i]--;p.carryType="gold"}else if(iron[i]>0){iron[i]--;p.carryType="iron"}else{rocks[i]--;p.carryType="stone"}p.carryAmount=1+(Math.random()<skillLevel(p,"Miner")/180?1:0);clearCachedTile(p,"surfaceMine");gainSkill(p,"Miner",.14);rewardWork(p,.06);spawnParticles("stone",p.x,p.y,5);return true}}
+  if(p.job==="Woodcutter"){const target=cachedNearestTile(p,"wood",(i)=>trees[i]>0,34,36);if(target){p.goal="Cut wood";if(!atTarget(p,target,1)){moveToward(p,target);return true}const i=idx(target.x,target.y);trees[i]--;clearCachedTile(p,"wood");p.carryType="wood";p.carryAmount=1+(Math.random()<skillLevel(p,"Woodcutter")/150?1:0);gainSkill(p,"Woodcutter",.13);rewardWork(p,.045);spawnParticles("leaf",p.x,p.y,6);return true}}
   if(p.job==="Hauler"){const f=buildingsOf("farm",true,p.settlementId).find(f=>f.crop>=100);if(f){p.goal="Collect harvest";if(!atTarget(p,f,2)){moveToward(p,f);return true}p.carryType="food";p.carryAmount=4+Math.floor(skillLevel(p,"Hauler")/45);f.crop=12;gainSkill(p,"Hauler",.10);rewardWork(p,.04);return true}}
-  const target=nearestTile(p,(i)=>food[i]>0,34);if(target){p.goal="Gather food";if(!atTarget(p,target,1)){moveToward(p,target);return true}const i=idx(target.x,target.y);food[i]--;p.carryType="food";p.carryAmount=2+(Math.random()<skillLevel(p,"Gatherer")/160?1:0);gainSkill(p,"Gatherer",.11);rewardWork(p,.035);return true}
+  const target=cachedNearestTile(p,"food",(i)=>food[i]>0,34,34);if(target){p.goal="Gather food";if(!atTarget(p,target,1)){moveToward(p,target);return true}const i=idx(target.x,target.y);food[i]--;clearCachedTile(p,"food");p.carryType="food";p.carryAmount=2+(Math.random()<skillLevel(p,"Gatherer")/160?1:0);gainSkill(p,"Gatherer",.11);rewardWork(p,.035);return true}
   wander(p);return true;
 }
 function homeCapacity(s=settlement){return s?buildingsOf("hut",true,s.id).length*4+2:2}
 function matchPartners(){
-  const singles=people.filter(p=>p.alive&&p.age>=18&&!p.partner&&p.layer!=="underground"&&day-(p.lastBreakupDay||-999)>7);
-  for(const p of singles){
-    if(p.partner)continue;
-    let best=null,bestScore=.55;
-    for(const q of singles){
-      if(q===p||q.partner||q.sex===p.sex||q.settlementId!==p.settlementId||Math.abs(q.age-p.age)>18||isCloseKin(p,q))continue;
-      const dist=Math.hypot(q.x-p.x,q.y-p.y);
-      if(dist>22)continue;
-      const score=compatibilityScore(p,q)+relationValue(p,q.id)/220+relationValue(q,p.id)/220-dist/170;
-      if(score>bestScore){bestScore=score;best=q}
-    }
-    if(best&&Math.random()<.16){
-      p.partner=best.id;best.partner=p.id;
-      p.relationshipStage=best.relationshipStage="dating";
-      p.relationshipSince=best.relationshipSince=Math.floor(day);
-      const initial=Math.round(16+compatibilityScore(p,best)*24);
-      p.relations[best.id]=Math.max(relationValue(p,best.id),initial);
-      best.relations[p.id]=Math.max(relationValue(best,p.id),initial);
-      memoryAdd(p,`Started dating ${best.name}`);
-      memoryAdd(best,`Started dating ${p.name}`);
-      addEvent(`${p.name} and ${best.name} began dating.`,"relationship")
+  for(const s of settlements){
+    const singles=settlementPeople(s,true).filter(p=>p.age>=18&&!p.partner&&p.layer!=="underground"&&day-(p.lastBreakupDay||-999)>7);
+    if(singles.length<2)continue;
+    for(const p of singles){
+      if(p.partner)continue;
+      let best=null,bestScore=.55;
+      for(const q of singles){
+        if(q===p||q.partner||q.sex===p.sex||Math.abs(q.age-p.age)>18||isCloseKin(p,q))continue;
+        const dx=q.x-p.x,dy=q.y-p.y;
+        if(Math.abs(dx)>22||Math.abs(dy)>22)continue;
+        const dist=Math.hypot(dx,dy),score=compatibilityScore(p,q)+relationValue(p,q.id)/220+relationValue(q,p.id)/220-dist/170;
+        if(score>bestScore){bestScore=score;best=q}
+      }
+      if(best&&Math.random()<.16){
+        p.partner=best.id;best.partner=p.id;p.relationshipStage=best.relationshipStage="dating";p.relationshipSince=best.relationshipSince=Math.floor(day);
+        const initial=Math.round(16+compatibilityScore(p,best)*24);
+        p.relations[best.id]=Math.max(relationValue(p,best.id),initial);best.relations[p.id]=Math.max(relationValue(best,p.id),initial);
+        memoryAdd(p,`Started dating ${best.name}`);memoryAdd(best,`Started dating ${p.name}`);addEvent(`${p.name} and ${best.name} began dating.`,"relationship")
+      }
     }
   }
 }
@@ -1545,7 +1656,7 @@ function updateRelationships(){
   const done=new Set();
   for(const p of people){
     if(!p.alive||!p.partner||done.has(p.id))continue;
-    const q=people.find(x=>x.id===p.partner);
+    const q=personById(p.partner);
     if(!q||!q.alive){
       p.partner=null;p.relationshipStage="single";p.familySurname=null;p.marriageDay=null;
       memoryAdd(p,"Lost their partner");
@@ -1593,8 +1704,8 @@ function tryBirths(){
   for(const mother of people){
     if(!mother.alive||mother.sex!=="F"||mother.age<18||mother.age>42||!mother.partner||day-mother.lastBirthDay<22)continue;
     const s=citizenSettlement(mother);if(!s||homeCapacity(s)<=settlementPopulation(s)||s.food<12)continue;
-    const father=people.find(p=>p.id===mother.partner&&p.alive&&p.settlementId===mother.settlementId);
-    if(!father||father.partner!==mother.id)continue;
+    const father=personById(mother.partner);
+    if(!father||!father.alive||father.settlementId!==mother.settlementId||father.partner!==mother.id)continue;
     const bond=relationshipBond(mother,father),baseChance=mother.relationshipStage==="married"?.011:.0065;
     if(Math.random()>baseChance*clamp((bond+100)/150,.30,1.35))continue;
     let childSurname,chosenBy=null;
@@ -1607,7 +1718,7 @@ function tryBirths(){
     baby.belief=clamp(((mother.belief||40)+(father.belief||40))/2+rnd(-14,14),5,95);baby.faithStance=faithStance(baby);
     for(const k of ["bravery","work","social","curiosity","kindness"])baby.traits[k]=clamp(((mother.traits?.[k]||.5)+(father.traits?.[k]||.5))/2+rnd(-.13,.13),.12,.95);
     baby.lifespan=clamp((mother.lifespan+father.lifespan)/2+rnd(-8,8),62,98);baby.education=0;baby.longGoal="Grow up safely";
-    mother.children.push(baby.id);father.children.push(baby.id);mother.lastBirthDay=day;s.food=Math.max(0,s.food-6);people.push(baby);s.births++;
+    mother.children.push(baby.id);father.children.push(baby.id);mother.lastBirthDay=day;s.food=Math.max(0,s.food-6);people.push(baby);invalidateWorldIndex();s.births++;
     memoryAdd(mother,`Gave birth to ${name} in ${s.name}`);memoryAdd(father,`Became parent of ${name}`);
     if(chosenBy)memoryAdd(chosenBy,`Chose the ${childSurname} surname for ${firstNameOf(baby)}`);
     addEvent(`${name} was born in ${s.name} to ${mother.name} and ${father.name}.`,"family");break
@@ -1622,7 +1733,7 @@ function think(p){if(!p.alive)return;p.px+=(p.x-p.px)*.23;p.py+=(p.y-p.py)*.23;p
   const pi=idx(clamp(Math.round(p.x),0,WORLD_W-1),clamp(Math.round(p.y),0,WORLD_H-1));if(p.layer!=="underground"){if(terrain[pi]===T.LAVA)p.health-=1.6;else if(burn[pi]>110)p.health-=.30}else if(underground[pi]===U.MAGMA)p.health-=1.8;if(p.hunger>92||p.thirst>94)p.health-=.09;else if(p.health<100&&p.hunger<55&&p.thirst<55)p.health+=.014;if(p.health<=0){const cause=p.hunger>92?"starvation":p.thirst>94?"dehydration":terrain[pi]===T.LAVA||underground[pi]===U.MAGMA?"burns":"injury";handleDeath(p,cause);return}
   if(aiFlee(p))return;
   if(p.layer==="underground"&&p.job==="Miner"){p.mood="Working below";workMinerUnderground(p);return}
-  if(p.thirst>60){p.goal="Find water";p.mood="Thirsty";if(nearWater(p))p.thirst=clamp(p.thirst-20,0,100);else moveToward(p,nearestTile(p,(i)=>terrain[i]===T.WATER,36));return}
+  if(p.thirst>60){p.goal="Find water";p.mood="Thirsty";if(nearWater(p))p.thirst=clamp(p.thirst-20,0,100);else moveToward(p,cachedNearestTile(p,"water",(i)=>terrain[i]===T.WATER||terrain[i]===T.DEEP,36,90));return}
   if(eatFromStores(p))return;
   if(p.energy<22){p.goal="Rest";p.mood="Tired";const home=nearestBuilding(p,"hut")||nearestBuilding(p,"firepit");if(home&&!atTarget(p,home,2))moveToward(p,home);else p.energy=clamp(p.energy+.8,0,100);return}
   if(p.age<14){p.job="Child";teachChild(p);const home=homeFor(p)||nearestBuilding(p,"hut")||nearestBuilding(p,"firepit");p.goal=p.education<55?"Learn and stay near home":"Explore near home";if(home&&Math.hypot(p.x-home.x,p.y-home.y)>7)moveToward(p,home);else if(Math.random()<.08+(p.traits?.curiosity||.5)*.03)wander(p);return}
@@ -1675,8 +1786,44 @@ function consumeSettlement(){
     if(alive>0)s.food=Math.max(0,s.food-Math.max(1,Math.floor(alive/4)))
   }
 }
-function simulate(){if(paused)return;const loops=speed===1?1:speed===2?2:5;for(let l=0;l<loops;l++){tick++;day+=.008;people.forEach(think);updateCritters();buildings.forEach(b=>b.age++);updateFarms();consumeSettlement();if(tick%95===0)updateRelationships();if(tick%120===0)assignJobs();if(tick%160===0)livingCivUpdate();if(tick%190===0){for(const s of settlements)planVillage(s);matchPartners();tryBirths()}if(tick%620===0)attemptExpansion();if(tick%760===0)updatePoliticalWorld();if(tick%380===0)updateV10Systems();if(tick%280===0){for(let n=0;n<280;n++){const x=rndi(0,WORLD_W-1),y=rndi(0,WORLD_H-1),i=idx(x,y);if(terrain[i]===T.GRASS&&food[i]<4&&Math.random()<.15)food[i]++;if(terrain[i]===T.FOREST&&trees[i]<4&&Math.random()<.18)trees[i]++;if(wet[i])wet[i]--;if(scar[i])scar[i]--;if(burn[i])burn[i]=Math.max(0,burn[i]-2)}dirty=true}}
-  particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.life--;p.vy+=p.type==="leaf"?.006:0});particles=particles.filter(p=>p.life>0);clouds.forEach(c=>{c.life--;c.phase+=.015;c.x+=.015});clouds=clouds.filter(c=>c.life>0);updateUI()}
+function simulate(){
+  if(paused)return;ensureWorldIndex();
+  const loops=speed===1?1:speed===2?2:5;
+  for(let l=0;l<loops;l++){
+    tick++;day+=.008;
+    for(const p of people)think(p);
+    updateCritters();for(const b of buildings)b.age++;updateFarms();consumeSettlement();
+
+    // Expensive systems intentionally land on different frames.
+    if(tick%95===11)updateRelationships();
+    if(tick%120===37)assignJobs();
+    if(tick%160===71)livingCivUpdate();
+    if(tick%190===109){for(const s of settlements)planVillage(s);matchPartners();tryBirths()}
+    if(tick%620===211)attemptExpansion();
+    if(tick%760===337)updatePoliticalWorld();
+
+    // Culture / faith / economy no longer execute as one giant spike.
+    if(tick%380===69)updateCultures();
+    if(tick%380===169)updateReligions();
+    if(tick%380===269)updateEconomy();
+
+    if(tick%280===143){
+      for(let n=0;n<280;n++){
+        const x=rndi(0,WORLD_W-1),y=rndi(0,WORLD_H-1),i=idx(x,y);
+        if(terrain[i]===T.GRASS&&food[i]<4&&Math.random()<.15)food[i]++;
+        if(terrain[i]===T.FOREST&&trees[i]<4&&Math.random()<.18)trees[i]++;
+        if(wet[i])wet[i]--;if(scar[i])scar[i]--;if(burn[i])burn[i]=Math.max(0,burn[i]-2)
+      }
+      // IMPORTANT: no dirty=true here. Food/tree regrowth does not require
+      // rebuilding the multi-million-pixel terrain backing canvas.
+    }
+  }
+  for(const p of particles){p.x+=p.vx;p.y+=p.vy;p.life--;p.vy+=p.type==="leaf"?.006:0}
+  particles=particles.filter(p=>p.life>0);
+  for(const c of clouds){c.life--;c.phase+=.015;c.x+=.015}
+  clouds=clouds.filter(c=>c.life>0);
+  updateUI(false)
+}
 
 function generate(useExistingSeed=false){
   if(useExistingSeed){worldConfig=normalizeWorldConfig(lastGeneratedConfig)}
@@ -1728,7 +1875,7 @@ function generate(useExistingSeed=false){
 
   nextPersonId=1;nextBuildingId=1;nextCritterId=1;nextSettlementId=1;nextKingdomId=1;nextWarId=1;nextCultureId=1;nextReligionId=1;nextHolySiteId=1;
   usedNames.clear();usedFirstNames.clear();
-  people=[];settlements=[];kingdoms=[];wars=[];tradeRoutes=[];cultures=[];religions=[];holySites=[];divineChronicle=[];settlement=null;atlasMode="political";
+  people=[];settlements=[];kingdoms=[];wars=[];tradeRoutes=[];cultures=[];religions=[];holySites=[];divineChronicle=[];settlement=null;atlasMode="political";worldIndexDirty=true;buildingOrderDirty=true;
 
   const startPop=configValue("startPopulation");
   for(let n=0;n<startPop;n++){
@@ -1736,6 +1883,7 @@ function generate(useExistingSeed=false){
     const name=generateUniqueName(n===0?"Mara":n===1?"Dren":null);
     people.push(makePerson(name,sx+rndi(-3,3),sy+rndi(-2,2),sex,rndi(19,30)))
   }
+  invalidateWorldIndex();
   if(people.length>=2){
     people[0].partner=people[1].id;people[1].partner=people[0].id;
     people[0].relationshipStage=people[1].relationshipStage="dating";
@@ -1763,9 +1911,9 @@ function generate(useExistingSeed=false){
   showToast(useExistingSeed?"World reset":"New customized world created")
 }
 
-function drawTrails(){const b=visibleBounds(2),step=zoom<3?3:zoom<4?2:1;ctx.save();ctx.lineCap="round";for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){const v=trail[idx(x,y)];if(v<12)continue;const s=worldToScreen(x+.5,y+.5),z=cameraScale();ctx.fillStyle=v>80?"rgba(118,88,55,.52)":`rgba(135,103,67,${Math.min(.38,v/230)})`;ctx.beginPath();ctx.ellipse(s.x,s.y,Math.max(1.4,z*.48),Math.max(1,z*.22),hash(x,y,9)*Math.PI,0,Math.PI*2);ctx.fill()}ctx.restore()}
+function drawTrails(){const b=visibleBounds(2),step=adaptiveStep(b,zoom<3?3:zoom<4?2:1,19000);ctx.save();ctx.lineCap="round";for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){const v=trail[idx(x,y)];if(v<12)continue;const s=worldToScreen(x+.5,y+.5),z=cameraScale();ctx.fillStyle=v>80?"rgba(118,88,55,.52)":`rgba(135,103,67,${Math.min(.38,v/230)})`;ctx.beginPath();ctx.ellipse(s.x,s.y,Math.max(1.4,z*.48),Math.max(1,z*.22),hash(x,y,9)*Math.PI,0,Math.PI*2);ctx.fill()}ctx.restore()}
 function drawOrganicLandOverlay(){
-  const b=visibleBounds(4),z=cameraScale(),step=zoom<2.8?3:2;
+  const b=visibleBounds(4),z=cameraScale(),step=adaptiveStep(b,zoom<2.8?3:2,17000);
   ctx.save();
   for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){
     const i=idx(x,y),t=terrain[i];if(isWaterTile(t)||t===T.LAVA)continue;
@@ -1779,10 +1927,10 @@ function drawOrganicLandOverlay(){
   ctx.restore()
 }
 function drawCoastalBlend(){
-  const b=visibleBounds(4),z=cameraScale(),t=visualTime;
+  const b=visibleBounds(4),z=cameraScale(),t=visualTime,step=adaptiveStep(b,1,22000);
   ctx.save();ctx.lineCap="round";
-  for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y++){
-    for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x++){
+  for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step){
+    for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){
       const i=idx(x,y),tt=terrain[i];
       if(!isWaterTile(tt)||shoreDistance[i]>1.5)continue;
       const normal=normalizedShoreVector(x,y);if(!normal.count)continue;
@@ -1803,7 +1951,7 @@ function drawWater(){
 
   // No repeated wave stripes across the open ocean.
   // Visible waves are breaking surf and backwash oriented to the coastline.
-  const step=zoom<3?2:1;
+  const step=adaptiveStep(b,zoom<3?2:1,24000);
   for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step){
     for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){
       const i=idx(x,y);if(!isWaterTile(terrain[i]))continue;
@@ -1854,7 +2002,7 @@ function drawWater(){
   ctx.restore()
 }
 function drawGroundDetails(){
-  const b=visibleBounds(3),step=zoom<4?2:1,z=cameraScale();
+  const b=visibleBounds(3),step=adaptiveStep(b,zoom<4?2:1,18000),z=cameraScale();
   for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){
     const i=idx(x,y),t=terrain[i],s=worldToScreen(x+.5,y+.5),h=hash(x,y,worldSeed+411);
     if((t===T.GRASS||t===T.FOREST)&&zoom>=3&&h>.62){ctx.strokeStyle=h>.92?'#f1d37d':h>.82?'#a4d27a':'#659f56';ctx.lineWidth=Math.max(1,z*.07);ctx.beginPath();ctx.moveTo(s.x-z*.14,s.y+z*.18);ctx.lineTo(s.x-z*.04,s.y-z*.12);ctx.moveTo(s.x,s.y+z*.18);ctx.lineTo(s.x,s.y-z*.24);ctx.moveTo(s.x+z*.13,s.y+z*.16);ctx.lineTo(s.x+z*.04,s.y-z*.10);ctx.stroke()}
@@ -1947,7 +2095,7 @@ function drawTree(x,y){
   if(hash(x,y,worldSeed+1800)>.52)drawPineTree(x,y);else drawBroadleafTree(x,y)
 }
 function drawTerrainFeatures(){
-  const b=visibleBounds(5),camZ=cameraScale(),step=camZ<3?2:1;
+  const b=visibleBounds(5),camZ=cameraScale(),step=adaptiveStep(b,camZ<3?2:1,16000);
   for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){
     const i=idx(x,y),t=terrain[i],gate=hash(x,y,88);
     if(t===T.FOREST&&trees[i]>0){
@@ -2047,7 +2195,7 @@ function drawPerson(p){
   }
 }
 function drawUndergroundResources(){
-  const b=visibleBounds(3),step=zoom<3?3:zoom<5?2:1,z=cameraScale();
+  const b=visibleBounds(3),step=adaptiveStep(b,zoom<3?3:zoom<5?2:1,17000),z=cameraScale();
   for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){
     const i=idx(x,y),s=worldToScreen(x+.5,y+.5),h=hash(x,y,worldSeed+1500);
     if(underground[i]===U.MAGMA){ctx.fillStyle=`rgba(255,126,35,${.28+.18*Math.sin(tick*.07+x*.5)})`;ctx.beginPath();ctx.arc(s.x,s.y,Math.max(2,z*.46),0,Math.PI*2);ctx.fill();ctx.fillStyle="rgba(255,192,81,.12)";ctx.beginPath();ctx.arc(s.x,s.y,z*1.05,0,Math.PI*2);ctx.fill()}
@@ -2065,7 +2213,10 @@ function drawMineShaftUnderground(b){
   ctx.strokeStyle="#af8655";ctx.lineWidth=Math.max(1,z*.13);ctx.beginPath();ctx.arc(s.x,s.y,z*.82,Math.PI,Math.PI*2);ctx.stroke();
   ctx.fillStyle="#e4b85e";ctx.beginPath();ctx.arc(s.x,s.y-z*.25,z*.16,0,Math.PI*2);ctx.fill()
 }
-function drawMiniMap(){
+function drawMiniMap(force=false){
+  const now=visualTime*1000,interval=settings.autoPerformance?(perfState.detail>1.65?260:perfState.detail>1.2?190:135):100;
+  if(!force&&now-lastMiniMapRefreshMs<interval)return;
+  lastMiniMapRefreshMs=now;
   if(dirty)rebuildTerrain();if(undergroundDirty)rebuildUnderground();const w=miniMap.width,h=miniMap.height;mmctx.clearRect(0,0,w,h);
   if(activeLayer==="surface")mmctx.drawImage(terrainCanvas,0,0,terrainCanvas.width,terrainCanvas.height,0,0,w,h);else mmctx.drawImage(undergroundCanvas,0,0,undergroundCanvas.width,undergroundCanvas.height,0,0,w,h);
   const sx=w/WORLD_W,sy=h/WORLD_H;
@@ -2093,10 +2244,10 @@ function drawVignette(){
   ctx.fillStyle=g;ctx.fillRect(0,0,canvas.width,canvas.height)
 }
 function renderUnderground(){
-  if(undergroundDirty)rebuildUnderground();clampCamera();ctx.fillStyle="#171312";ctx.fillRect(0,0,canvas.width,canvas.height);
+  if(undergroundDirty)rebuildUnderground();ensureWorldIndex();clampCamera();ctx.fillStyle="#171312";ctx.fillRect(0,0,canvas.width,canvas.height);
   const s=cameraScale(),v=viewportWorldSize(),viewLeft=camX-v.w/2,viewTop=camY-v.h/2,wl=Math.max(0,viewLeft),wt=Math.max(0,viewTop),wr=Math.min(WORLD_W,viewLeft+v.w),wb=Math.min(WORLD_H,viewTop+v.h);
   if(wr>wl&&wb>wt){ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";ctx.drawImage(undergroundCanvas,wl*TEX,wt*TEX,(wr-wl)*TEX,(wb-wt)*TEX,(wl-viewLeft)*s,(wt-viewTop)*s,(wr-wl)*s,(wb-wt)*s)}
-  drawUndergroundResources();buildingsOf("mine").forEach(drawMineShaftUnderground);people.filter(p=>p.layer==="underground").sort((a,b)=>a.py-b.py).forEach(drawPerson);if(settings.effects)drawParticles();
+  drawUndergroundResources();drawUndergroundEntities();if(settings.effects)drawParticles();
   const topGlow=ctx.createLinearGradient(0,0,0,canvas.height*.28);topGlow.addColorStop(0,"rgba(255,190,88,.08)");topGlow.addColorStop(1,"rgba(0,0,0,0)");ctx.fillStyle=topGlow;ctx.fillRect(0,0,canvas.width,canvas.height);drawVignette();drawMiniMap()
 }
 function polityColor(s,alpha=1){
@@ -2107,39 +2258,25 @@ function polityColor(s,alpha=1){
   return `rgba(${r},${g},${b},${alpha})`
 }
 function drawPoliticalLayer(){
-  if(activeLayer!=="surface"||settlements.length<2)return;
-  ctx.save();
-  // Trade routes
+  if(activeLayer!=="surface"||settlements.length<2)return;ensureWorldIndex();
+  const bounds=visibleBounds(36),z=cameraScale();ctx.save();
   for(const r of tradeRoutes){
     const a=settlementById(r.aId),b=settlementById(r.bId);if(!a||!b)continue;
-    const A=worldToScreen(a.x,a.y),B=worldToScreen(b.x,b.y);
-    ctx.strokeStyle="rgba(244,211,128,.28)";ctx.lineWidth=Math.max(1,Math.min(3,cameraScale()*.08));
-    ctx.setLineDash([6,7]);ctx.beginPath();ctx.moveTo(A.x,A.y);ctx.quadraticCurveTo((A.x+B.x)/2,(A.y+B.y)/2-12,B.x,B.y);ctx.stroke()
+    if(!inVisibleBounds(a.x,a.y,bounds,40)&&!inVisibleBounds(b.x,b.y,bounds,40))continue;
+    const A=worldToScreen(a.x,a.y),B=worldToScreen(b.x,b.y);ctx.strokeStyle="rgba(244,211,128,.28)";ctx.lineWidth=Math.max(1,Math.min(3,z*.08));ctx.setLineDash([6,7]);ctx.beginPath();ctx.moveTo(A.x,A.y);ctx.quadraticCurveTo((A.x+B.x)/2,(A.y+B.y)/2-12,B.x,B.y);ctx.stroke()
   }
   ctx.setLineDash([]);
-  // Soft territories and settlement banners
   for(const s of settlements){
-    const P=worldToScreen(s.x,s.y),z=cameraScale(),rad=settlementRadius(s)*z;
-    if(rad<canvas.width*1.2){
-      ctx.fillStyle=polityColor(s,.028);ctx.strokeStyle=polityColor(s,.25);ctx.lineWidth=Math.max(1,z*.08);
-      ctx.beginPath();ctx.arc(P.x,P.y,rad,0,Math.PI*2);ctx.fill();ctx.stroke()
-    }
-    const pop=settlementPopulation(s);
-    ctx.fillStyle="rgba(8,17,20,.80)";ctx.beginPath();
-    if(ctx.roundRect)ctx.roundRect(P.x-z*1.1,P.y-z*2.9,z*2.2,z*.95,z*.25);else ctx.rect(P.x-z*1.1,P.y-z*2.9,z*2.2,z*.95);
-    ctx.fill();
-    ctx.fillStyle=polityColor(s,1);ctx.fillRect(P.x-z*.88,P.y-z*2.68,z*.28,z*.40);
-    if(zoom>=3.7){
-      ctx.fillStyle="#f5f8f7";ctx.textAlign="left";ctx.font=`700 ${Math.max(7,Math.round(z*.55))}px -apple-system,system-ui`;
-      ctx.fillText(`${s.name} · ${pop}`,P.x-z*.46,P.y-z*2.35)
-    }
+    const radius=settlementRadius(s);if(!inVisibleBounds(s.x,s.y,bounds,radius+6))continue;
+    const P=worldToScreen(s.x,s.y),rad=radius*z;
+    if(rad<canvas.width*1.2){ctx.fillStyle=polityColor(s,.028);ctx.strokeStyle=polityColor(s,.25);ctx.lineWidth=Math.max(1,z*.08);ctx.beginPath();ctx.arc(P.x,P.y,rad,0,Math.PI*2);ctx.fill();ctx.stroke()}
+    const pop=settlementPopulation(s);ctx.fillStyle="rgba(8,17,20,.80)";ctx.beginPath();if(ctx.roundRect)ctx.roundRect(P.x-z*1.1,P.y-z*2.9,z*2.2,z*.95,z*.25);else ctx.rect(P.x-z*1.1,P.y-z*2.9,z*2.2,z*.95);ctx.fill();ctx.fillStyle=polityColor(s,1);ctx.fillRect(P.x-z*.88,P.y-z*2.68,z*.28,z*.40);
+    if(zoom>=3.7){ctx.fillStyle="#f5f8f7";ctx.textAlign="left";ctx.font=`700 ${Math.max(7,Math.round(z*.55))}px -apple-system,system-ui`;ctx.fillText(`${s.name} · ${pop}`,P.x-z*.46,P.y-z*2.35)}
   }
-  // Active war fronts
-  for(const w of wars.filter(w=>w.status==="active")){
-    const a=settlementById(w.aId),b=settlementById(w.bId);if(!a||!b)continue;
-    const x=(a.x+b.x)/2,y=(a.y+b.y)/2,P=worldToScreen(x,y),z=cameraScale();
-    ctx.fillStyle="rgba(30,20,18,.84)";ctx.beginPath();ctx.arc(P.x,P.y,z*.85,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle="#f1d3b5";ctx.textAlign="center";ctx.font=`${Math.max(9,z*.75)}px system-ui`;ctx.fillText("⚔",P.x,P.y+z*.25)
+  for(const w of wars){
+    if(w.status!=="active")continue;const a=settlementById(w.aId),b=settlementById(w.bId);if(!a||!b)continue;
+    const x=(a.x+b.x)/2,y=(a.y+b.y)/2;if(!inVisibleBounds(x,y,bounds,5))continue;const P=worldToScreen(x,y);
+    ctx.fillStyle="rgba(30,20,18,.84)";ctx.beginPath();ctx.arc(P.x,P.y,z*.85,0,Math.PI*2);ctx.fill();ctx.fillStyle="#f1d3b5";ctx.textAlign="center";ctx.font=`${Math.max(9,z*.75)}px system-ui`;ctx.fillText("⚔",P.x,P.y+z*.25)
   }
   ctx.restore()
 }
@@ -2172,9 +2309,9 @@ function drawCritter(c){
   ctx.beginPath();ctx.moveTo(s.x+dir*z*.32,s.y-z*.18+bob);ctx.lineTo(s.x+dir*z*.39,s.y-z*.34+bob);ctx.moveTo(s.x+dir*z*.39,s.y-z*.30+bob);ctx.lineTo(s.x+dir*z*.47,s.y-z*.39+bob);ctx.stroke()
 }
 function drawHazards(){
-  const b=visibleBounds(3),z=cameraScale(),t=visualTime;
-  for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y++){
-    for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x++){
+  const b=visibleBounds(3),z=cameraScale(),t=visualTime,step=adaptiveStep(b,1,21000);
+  for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step){
+    for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){
       const i=idx(x,y),burnAmt=burn[i],tile=terrain[i];
       if(tile===T.LAVA){
         if(hash(x,y,worldSeed+505)<.60)continue;
@@ -2291,12 +2428,31 @@ function drawLighting(){
   if(!settings.dayNight)return;const cycle=(tick%2600)/2600;let a=0;if(cycle<.18)a=.26*(1-cycle/.18);else if(cycle>.78)a=.30*((cycle-.78)/.22);
   if(a){const grad=ctx.createLinearGradient(0,0,0,canvas.height);grad.addColorStop(0,`rgba(18,35,66,${a*.9})`);grad.addColorStop(1,`rgba(5,12,20,${a})`);ctx.fillStyle=grad;ctx.fillRect(0,0,canvas.width,canvas.height)}
 }
+function inVisibleBounds(x,y,b,pad=3){return x>=b.l-pad&&x<=b.r+pad&&y>=b.t-pad&&y<=b.b+pad}
+function drawSurfaceEntities(){
+  const b=visibleBounds(5),z=cameraScale();
+  for(const building of getSortedBuildings())if(inVisibleBounds(building.x,building.y,b,5))drawBuilding(building);
+  const visibleCritters=[];for(const c of critters)if(c.alive&&inVisibleBounds(c.px,c.py,b,4))visibleCritters.push(c);
+  if(z>3.4)visibleCritters.sort((a,b)=>a.py-b.py);
+  for(const c of visibleCritters)drawCritter(c);
+  const visiblePeople=[];for(const p of alivePeople())if(p.layer!=="underground"&&inVisibleBounds(p.px,p.py,b,4))visiblePeople.push(p);
+  if(z>3.4)visiblePeople.sort((a,b)=>a.py-b.py);
+  for(const p of visiblePeople)drawPerson(p)
+}
+function drawUndergroundEntities(){
+  const b=visibleBounds(5),z=cameraScale();
+  for(const mine of buildingsOf("mine"))if(inVisibleBounds(mine.x,mine.y,b,5))drawMineShaftUnderground(mine);
+  const visiblePeople=[];for(const p of alivePeople())if(p.layer==="underground"&&inVisibleBounds(p.px,p.py,b,4))visiblePeople.push(p);
+  if(z>3.4)visiblePeople.sort((a,b)=>a.py-b.py);
+  for(const p of visiblePeople)drawPerson(p)
+}
 function render(){
   if(activeLayer==="underground"){renderUnderground();return}
-  if(dirty)rebuildTerrain();clampCamera();ctx.fillStyle="#1c4f6f";ctx.fillRect(0,0,canvas.width,canvas.height);
+  if(dirty)rebuildTerrain();ensureWorldIndex();clampCamera();ctx.fillStyle="#1c4f6f";ctx.fillRect(0,0,canvas.width,canvas.height);
   const s=cameraScale(),v=viewportWorldSize(),viewLeft=camX-v.w/2,viewTop=camY-v.h/2,wl=Math.max(0,viewLeft),wt=Math.max(0,viewTop),wr=Math.min(WORLD_W,viewLeft+v.w),wb=Math.min(WORLD_H,viewTop+v.h);
   if(wr>wl&&wb>wt){ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";ctx.drawImage(terrainCanvas,wl*TEX,wt*TEX,(wr-wl)*TEX,(wb-wt)*TEX,(wl-viewLeft)*s,(wt-viewTop)*s,(wr-wl)*s,(wb-wt)*s)}
-  drawOrganicLandOverlay();drawCoastalBlend();drawSurfaceAtmosphere();drawWater();if(settings.trails)drawTrails();drawPoliticalLayer();drawGroundDetails();drawHazards();drawTerrainFeatures();buildings.slice().sort((a,b)=>a.y-b.y).forEach(drawBuilding);critters.slice().sort((a,b)=>a.py-b.py).forEach(drawCritter);people.filter(p=>p.layer!=="underground").sort((a,b)=>a.py-b.py).forEach(drawPerson);if(settings.effects){drawParticles();drawTransientEffects()}drawClouds();drawLighting();drawVignette();drawMiniMap()
+  drawOrganicLandOverlay();drawCoastalBlend();drawSurfaceAtmosphere();drawWater();if(settings.trails)drawTrails();drawPoliticalLayer();drawGroundDetails();drawHazards();drawTerrainFeatures();drawSurfaceEntities();
+  if(settings.effects){drawParticles();drawTransientEffects()}drawClouds();drawLighting();drawVignette();drawMiniMap()
 }
 function eraName(){const pop=people.filter(p=>p.alive).length;if(pop>=18)return"Village";if(pop>=10)return"Hamlet";if(pop>=5)return"Growing Camp";if(buildingsOf("hut").length)return"Early Settlement";return"Primitive"}
 function jobCounts(){const c={};for(const p of people.filter(p=>p.alive)){c[p.job]=(c[p.job]||0)+1}return c}
@@ -2332,14 +2488,22 @@ const toolMeta={
   cave:["🕳️","Cave","Carve underground"],ustone:["🪨","Underground Stone","Fill with stone"],uwater:["💧","Underground Water","Create underground lake"],magma:["🌋","Magma","Create magma chamber"],uiron:["⛓️","Iron Vein","Create underground vein"],ugold:["🟡","Gold Vein","Create underground vein"],ucoal:["⬛","Coal Seam","Create underground seam"],crystal:["💎","Crystal","Create rare crystals"],reveal:["🔦","Reveal","Expose nearby deposits"]
 };
 function refreshToolChip(){const m=toolMeta[tool]||["✦",tool,"Use on world"];toolIcon.textContent=m[0];toolName.textContent=m[1];toolHint.textContent=m[2];inspectBtn.classList.toggle("active",tool==="inspect")}
-function updateUI(){if(!settlement)return;popEl.textContent=people.filter(p=>p.alive).length;dayEl.textContent=Math.floor(day);eraEl.textContent=eraName();pauseBtn.textContent=paused?"▶":"⏸";speedBtn.textContent="×"+speed;layerIcon.textContent=activeLayer==="surface"?"🌿":"⛏️";layerLabel.textContent=activeLayer==="surface"?"Surface":"Underground";layerBtn.classList.toggle("underground",activeLayer==="underground");layerBtn.classList.toggle("surface",activeLayer==="surface");if(miniMapMode)miniMapMode.textContent=activeLayer==="surface"?atlasMode[0].toUpperCase()+atlasMode.slice(1):"Underground";const m=toolMeta[tool]||["✦",tool,""];status.textContent=tool==="inspect"?`${layerName()} · inspect · drag · pinch to zoom`:`${layerName()} · ${m[1]} · ${["deer","sheep","wolf","human","couple","family"].includes(tool)?"tap to place":`brush ${brush} · drag to paint`}`;refreshToolChip();if(selected){const p=people.find(q=>q.id===selected);if(p&&!citizen.classList.contains("hidden"))showCitizen(p)}}
+function updateUI(force=true){
+  if(!settlement)return;
+  const now=visualTime*1000;if(!force&&now-lastUiRefreshMs<180)return;lastUiRefreshMs=now;ensureWorldIndex();
+  popEl.textContent=alivePopulation();dayEl.textContent=Math.floor(day);eraEl.textContent=eraName();pauseBtn.textContent=paused?"▶":"⏸";speedBtn.textContent="×"+speed;
+  layerIcon.textContent=activeLayer==="surface"?"🌿":"⛏️";layerLabel.textContent=activeLayer==="surface"?"Surface":"Underground";layerBtn.classList.toggle("underground",activeLayer==="underground");layerBtn.classList.toggle("surface",activeLayer==="surface");
+  if(miniMapMode)miniMapMode.textContent=activeLayer==="surface"?atlasMode[0].toUpperCase()+atlasMode.slice(1):"Underground";
+  const m=toolMeta[tool]||["✦",tool,""];status.textContent=tool==="inspect"?`${layerName()} · inspect · drag · pinch to zoom`:`${layerName()} · ${m[1]} · ${["deer","sheep","wolf","human","couple","family"].includes(tool)?"tap to place":`brush ${brush} · drag to paint`}`;
+  refreshToolChip();if(selected){const p=personById(selected);if(p&&!citizen.classList.contains("hidden"))showCitizen(p)}
+}
 function spawnHumanAt(wx,wy,age=20){
   if(!passable(wx,wy)){showToast("Choose dry land");return null}
   const sex=Math.random()<.5?"F":"M",name=generateUniqueName();
   const p=makePerson(name,wx,wy,sex,age);
   const nearest=settlements.slice().sort((a,b)=>Math.hypot(a.x-wx,a.y-wy)-Math.hypot(b.x-wx,b.y-wy))[0]||settlement;
   if(nearest){p.settlementId=nearest.id;p.originSettlementId=nearest.id;p.cultureId=nearest.cultureId;p.religionId=nearest.religionId}
-  people.push(p);addEvent(`${name} was placed into ${nearest?.name||"the world"} by the Creator.`,"divine");recordDivineEvent("creation",wx,wy,4);return p
+  people.push(p);invalidateWorldIndex();addEvent(`${name} was placed into ${nearest?.name||"the world"} by the Creator.`,"divine");recordDivineEvent("creation",wx,wy,4);return p
 }
 function applyTool(wx,wy,continuous=false){
   wx=Math.round(wx);wy=Math.round(wy);if(wx<0||wy<0||wx>=WORLD_W||wy>=WORLD_H)return;
@@ -2359,7 +2523,7 @@ function applyTool(wx,wy,continuous=false){
     const familyName=surnameOf(a),childName=generateUniqueName(null,familyName);
     const child=makePerson(childName,wx,wy+1,Math.random()<.5?"F":"M",6,[a.id,b.id]);
     child.settlementId=a.settlementId;child.originSettlementId=a.settlementId;
-    people.push(child);child.job="Child";a.children.push(child.id);b.children.push(child.id);
+    people.push(child);invalidateWorldIndex();child.job="Child";a.children.push(child.id);b.children.push(child.id);
     addEvent(`The ${familyName} family was placed into Tiny World.`,"divine")
   }assignJobs();return}
   if(tool==="heal"||tool==="bless"){
@@ -2506,12 +2670,14 @@ function historyHtml(){
 }
 function settingsHtml(){
   const row=(key,title,sub)=>`<div class="settingRow"><div><b>${title}</b><small>${sub}</small></div><button class="toggle ${settings[key]?"on":""}" data-setting="${key}" type="button" aria-label="${title}"></button></div>`;
-  return `${row("labels","Citizen name labels","Show names while closely zoomed")}${row("trails","Footpaths","Show paths created by walking")}${row("dayNight","Day & night lighting","Darken the world as time cycles")}${row("effects","Weather & particles","Clouds, rain and world effects")}
-  <div class="menuSection">World management</div><button class="bigAction" data-action="center-world" type="button">⌾ Center on First Hearth</button><button class="bigAction" data-action="open-world-creator" type="button">🌍 Open World Creator</button><button class="bigAction danger" data-action="open-world-reset" type="button">↺ Reset Current World</button>`
+  return `${row("autoPerformance","Automatic performance","Adjust decorative detail when frame time rises")}
+  <div class="performanceCard"><b>Performance engine</b><small>${performanceLabel()}</small><p>AI search caching, staggered simulation, adaptive rendering, entity culling and throttled Atlas updates are active.</p></div>
+  ${row("labels","Citizen name labels","Show names while closely zoomed")}${row("trails","Footpaths","Show paths created by walking")}${row("dayNight","Day & night lighting","Darken the world as time cycles")}${row("effects","Weather & particles","Clouds, rain and world effects")}
+  <div class="menuSection">World management</div><button class="bigAction" data-action="center-world" type="button">⌾ Center on selected settlement</button><button class="bigAction" data-action="open-world-creator" type="button">🌍 Open World Creator</button><button class="bigAction danger" data-action="open-world-reset" type="button">↺ Reset Current World</button>`
 }
 function updatesHtml(){
-  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V10.0 · Culture, Faith & Economy</h3><p>Civilizations now develop traditions, beliefs, markets, currencies and social identities that can diverge across generations.</p></div>
-  <div class="updateItem"><b>V10.0 — Culture, Faith & Economy</b><small>Current</small><p>Cultures now carry values, customs, festivals and heroes; daughter settlements can culturally diverge. Citizens have personal belief levels and religious stances. Divine actions alter how civilizations perceive the Creator and can create religions, prophets, clergy and holy sites. Settlements run markets with scarcity-driven prices, merchants, social classes, barter and emerging currencies. The Atlas adds Political, Culture, Faith and Economy modes.</p></div><div class="updateItem"><b>V9 — Civilizations & Kingdoms</b><small>Previous</small><p>Population pressure can create new settlements led by real migrating families. Every settlement has resources, buildings, territory, leaders, identity, diplomacy and military strength. Settlements trade, form kingdoms, develop rivalries, fight wars with named citizen casualties, and generate refugees whose citizenship histories persist.</p></div>
+  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V10.0.1 · Performance Core</h3><p>A dedicated optimization release focused on smoother frame pacing and eliminating simulation spikes before V10.1 continues.</p></div>
+  <div class="updateItem"><b>V10.0.1 — Performance Core</b><small>Current</small><p>Major optimization pass: cached world indexes and AI targets, staggered simulation updates, cheaper job assignment, local social/relationship searches, visible-entity culling, adaptive visual detail, particle budgets, throttled Atlas/HUD refreshes, lower backing-texture memory and removal of an unnecessary periodic full terrain rebuild.</p></div><div class="updateItem"><b>V10.0 — Culture, Faith & Economy</b><small>Previous</small><p>Cultures now carry values, customs, festivals and heroes; daughter settlements can culturally diverge. Citizens have personal belief levels and religious stances. Divine actions alter how civilizations perceive the Creator and can create religions, prophets, clergy and holy sites. Settlements run markets with scarcity-driven prices, merchants, social classes, barter and emerging currencies. The Atlas adds Political, Culture, Faith and Economy modes.</p></div><div class="updateItem"><b>V9 — Civilizations & Kingdoms</b><small>Previous</small><p>Population pressure can create new settlements led by real migrating families. Every settlement has resources, buildings, territory, leaders, identity, diplomacy and military strength. Settlements trade, form kingdoms, develop rivalries, fight wars with named citizen casualties, and generate refugees whose citizenship histories persist.</p></div>
   <div class="updateItem"><b>V8.3 — Natural Coastline Water</b><small>Previous</small><p>Natural shallow-water shelves and coastline-oriented animated surf.</p></div>
   <div class="updateItem"><b>V8.2 — Natural Effects</b><small>Previous</small><p>Lightning is now a real branching strike with a brief flash instead of a grid of hazard markers. Fire uses irregular animated flame clusters and embers. The broad turquoise ocean halo was removed at the terrain-color level, leaving only a narrow coastal shallows transition and moving foam.</p></div><div class="updateItem"><b>V8.1 — Living Ocean</b><small>Previous</small><p>Ocean animation moved to real elapsed frame time with traveling wave bands and tidal surf.</p></div><div class="updateItem"><b>V8 — Premium Painted World</b><small>Previous</small><p>The surface renderer moved to continuous height/moisture sampling with smoothed terrain, mixed forests and upgraded miniature people and wildlife.</p></div><div class="updateItem"><b>V7.2 — Painted World Pass</b><small>Previous</small><p>Added larger painterly land dabs, softer shore blending, stronger surf and more organic forest shapes.</p></div><div class="updateItem"><b>V7.1 — Brushed World Pass</b><small>Previous</small><p>Terrain leans harder into a brushed look with stronger painterly dabs, forests render more organically, and water has much more visible motion and shoreline surf.</p></div><div class="updateItem"><b>V7 — Premium Art Pass</b><small>Previous</small><p>The world now uses a richer painterly land overlay, softer coastal blending, more alive shore water, refined huts and farms, and upgraded tiny sprites so citizens and animals feel like miniature living beings in a premium-looking world.</p></div><div class="updateItem"><b>V6.6 — Organic Terrain + Sprite Overhaul</b><small>Previous</small><p>Coastlines became softer, shoreline water gained a light tide effect, wave motion became more visible, and both citizens and animals received upgraded tiny vector sprites.</p></div><div class="updateItem"><b>V6.5 — Grand Graphics Overhaul</b><small>Previous</small><p>The world surface was rebuilt with sharper texturing, richer biome color, animated wave motion, improved shoreline foam, bush-like food clusters, cleaner low-zoom forest rendering and stronger visual grounding between the land and the citizens.</p></div><div class="updateItem"><b>V6 — Living Civilization</b><small>Previous</small><p>Citizens age, learn, build skills, form households, create families, experience grief and leave a lineage behind.</p></div><div class="updateItem"><b>V5.4 — World Scale</b><small>Previous</small><p>Dynamic 100×100 through 500×500 world sizes.</p></div><div class="updateItem"><b>V5.3 — Family & Marriage</b><small>Previous</small><p>Dating, emotional bonds, marriage, shared surnames, breakups and child surname inheritance.</p></div><div class="updateItem"><b>V5.2 — Responsive World</b><small>Previous</small><p>Responsive landscape catalogs, smaller wording and procedural unique names.</p></div><div class="updateItem"><b>V5.1 — Living World</b><small>Previous</small><p>Compact HUD, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs and relationships.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
   <div class="updateItem"><b>V4.1 — Underground</b><small>Previous</small><p>Surface/Underground toggle, caves, deep stone, underground lakes, magma, iron/gold/coal/crystal veins, mine entrances, tunneling miners and layer-aware god powers.</p></div>
@@ -2585,7 +2751,7 @@ menuBody.addEventListener("click",e=>{
   const toolBtn=e.target.closest("[data-tool-select]");if(toolBtn){chooseTool(toolBtn.dataset.toolSelect);return}
   const settlementBtn=e.target.closest("[data-settlement]");if(settlementBtn){const s=settlementById(Number(settlementBtn.dataset.settlement));if(s){selectedSettlementId=s.id;camX=s.x;camY=s.y;clampCamera();worldSection="village";renderMainMenu();showToast(s.name)}return}
   const personBtn=e.target.closest("[data-person]");if(personBtn){const p=people.find(q=>q.id===Number(personBtn.dataset.person));if(p){closeMenu();showCitizen(p);camX=p.x;camY=p.y;clampCamera()}return}
-  const settingBtn=e.target.closest("[data-setting]");if(settingBtn){const k=settingBtn.dataset.setting;settings[k]=!settings[k];saveSettings();renderMainMenu();return}
+  const settingBtn=e.target.closest("[data-setting]");if(settingBtn){const k=settingBtn.dataset.setting;settings[k]=!settings[k];saveSettings();if(k==="autoPerformance"){perfState.detail=1;perfState.avgMs=16.7;perfState.quality="Full"}renderMainMenu();return}
   const action=e.target.closest("[data-action]");if(!action)return;
   const a=action.dataset.action;
   if(a==="center-world"){centerOnSettlement();closeMenu()}
@@ -2601,17 +2767,16 @@ miniMap.addEventListener("pointerdown",e=>{e.stopPropagation();const rect=miniMa
 miniMapToggle.addEventListener("click",e=>{e.stopPropagation();miniMapPanel.classList.toggle("compact");miniMapToggle.querySelector("small").textContent=miniMapPanel.classList.contains("compact")?"⌄":"⌃"});
 document.querySelectorAll("[data-atlas-mode]").forEach(btn=>btn.addEventListener("click",e=>{
   e.stopPropagation();atlasMode=btn.dataset.atlasMode;document.querySelectorAll("[data-atlas-mode]").forEach(b=>b.classList.toggle("active",b.dataset.atlasMode===atlasMode));
-  if(miniMapMode)miniMapMode.textContent=atlasMode[0].toUpperCase()+atlasMode.slice(1);drawMiniMap()
+  if(miniMapMode)miniMapMode.textContent=atlasMode[0].toUpperCase()+atlasMode.slice(1);drawMiniMap(true)
 }));
 uiToggleBtn.addEventListener("click",()=>{appEl.classList.toggle("uiHidden");uiToggleBtn.textContent=appEl.classList.contains("uiHidden")?"◩":"◫";uiToggleBtn.setAttribute("aria-label",appEl.classList.contains("uiHidden")?"Show interface":"Hide interface")});
 setTimeout(()=>document.getElementById("splash")?.classList.add("hide"),650);
 try{
   generate(false);resizeCanvas();refreshToolChip();
   function frame(now){
-    visualTime=now*.001;
+    visualTime=now*.001;updatePerformanceClock(now);
     if(now-lastSim>=75){simulate();lastSim=now}
-    render();
-    requestAnimationFrame(frame)
+    render();requestAnimationFrame(frame)
   }
   requestAnimationFrame(frame);
 }catch(err){

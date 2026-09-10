@@ -873,3 +873,8 @@ button.active{
 .faithCard p{font-size:7.5px;color:#b3c0c1;line-height:1.45;margin:4px 0 7px}
 .priceGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin:6px 0}.priceGrid span{padding:5px 3px;border-radius:8px;text-align:center;font-size:7px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.05)}
 @media(orientation:landscape) and (max-height:560px){.cultureCard,.faithCard,.economyCard{padding:6px;margin-bottom:5px}.atlasModes button{font-size:5.5px;padding:3px 1px}.priceGrid span{padding:4px 2px}}
+
+/* V10.0.1 — Performance Core */
+.performanceCard{padding:8px 9px;margin:0 0 7px;border-radius:12px;background:rgba(95,154,103,.07);border:1px solid rgba(133,194,137,.10)}
+.performanceCard b{display:block;font-size:9px}.performanceCard small{display:block;margin-top:2px;font-size:7px;color:#9fc4a3}
+.performanceCard p{margin:5px 0 0;font-size:7px;line-height:1.4;color:#96a9ac}

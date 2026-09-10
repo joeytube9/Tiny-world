@@ -1,7 +1,7 @@
 {
   "name": "Tiny World",
   "short_name": "Tiny World",
-  "description": "Tiny World V10.0 adds emergent cultures, personal belief, religions, prophets, holy sites, markets, scarcity pricing, merchants, social classes, currencies and new Atlas modes.",
+  "description": "Tiny World V10.0.1 Performance Core: cached AI searches, indexed world data, staggered systems, adaptive rendering, visible-entity culling, throttled UI and lower mobile memory use.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
