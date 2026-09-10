@@ -62,6 +62,71 @@ function textureScaleForWorld(size){return size<=100?8:size<=150?8:size<=200?7:s
 function shorelineVector(x,y,wantWater){let ox=0,oy=0,c=0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;const nx=x+dx,ny=y+dy;if(nx<0||ny<0||nx>=WORLD_W||ny>=WORLD_H)continue;const nt=terrain[idx(nx,ny)];if(wantWater?isWaterTile(nt):isLandTile(nt)){ox+=dx;oy+=dy;c++}}return c?{x:ox/c,y:oy/c,count:c}:{x:0,y:0,count:0}}
 function isWaterTile(t){return t===T.WATER||t===T.DEEP}
 function isLandTile(t){return !isWaterTile(t)}
+function smoothstep(a,b,x){const t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t)}
+function fieldSample(arr,x,y){
+  x=clamp(x,0,WORLD_W-1);y=clamp(y,0,WORLD_H-1);
+  const x0=Math.floor(x),y0=Math.floor(y),x1=Math.min(WORLD_W-1,x0+1),y1=Math.min(WORLD_H-1,y0+1);
+  const tx=x-x0,ty=y-y0;
+  const a=arr[idx(x0,y0)],b=arr[idx(x1,y0)],c=arr[idx(x0,y1)],d=arr[idx(x1,y1)];
+  return lerp(lerp(a,b,tx),lerp(c,d,tx),ty)
+}
+function typeWeight(x,y,type){
+  x=clamp(x,0,WORLD_W-1);y=clamp(y,0,WORLD_H-1);
+  const x0=Math.floor(x),y0=Math.floor(y),x1=Math.min(WORLD_W-1,x0+1),y1=Math.min(WORLD_H-1,y0+1);
+  const tx=x-x0,ty=y-y0;
+  const a=terrain[idx(x0,y0)]===type?1:0,b=terrain[idx(x1,y0)]===type?1:0,c=terrain[idx(x0,y1)]===type?1:0,d=terrain[idx(x1,y1)]===type?1:0;
+  return lerp(lerp(a,b,tx),lerp(c,d,tx),ty)
+}
+function paintedVisualSample(wx,wy,px,py){
+  let h=fieldSample(height,wx,wy),m=fieldSample(moisture,wx,wy);
+  const forest=typeWeight(wx,wy,T.FOREST),grass=typeWeight(wx,wy,T.GRASS),sand=typeWeight(wx,wy,T.SAND);
+  const mountain=typeWeight(wx,wy,T.MOUNTAIN),snow=typeWeight(wx,wy,T.SNOW),lava=typeWeight(wx,wy,T.LAVA);
+  const organic=(Math.sin(wx*.43+wy*.17+worldSeed*.013)+Math.sin(wx*.19-wy*.51+worldSeed*.021)+Math.cos(wx*.73+wy*.29))*0.0037;
+  h=clamp(h+organic,0,1);
+  m=clamp(m+forest*.24-grass*.035,0,1);
+
+  const waterShift=(configValue("water")-50)*.0019-(configValue("landmass")-50)*.0018;
+  const deep=.255+waterShift,waterLine=.345+waterShift,sandLine=.398+waterShift;
+  const mountainShift=(50-configValue("mountains"))*.0017;
+  const snowLine=.855+mountainShift,mountainLine=.735+mountainShift;
+  const forestThreshold=.72-configValue("forest")*.0024;
+
+  const land=smoothstep(waterLine-.018,waterLine+.020,h);
+  const beach=smoothstep(waterLine-.005,sandLine+.025,h);
+  const grassIn=smoothstep(sandLine-.010,sandLine+.050,h);
+  const mountainIn=smoothstep(mountainLine-.050,mountainLine+.040,h);
+  const snowIn=smoothstep(snowLine-.035,snowLine+.025,h);
+  const forestIn=smoothstep(forestThreshold-.12,forestThreshold+.07,m)*smoothstep(sandLine+.01,mountainLine-.04,h);
+
+  let deepC=mixColor([8,55,91],[16,82,129],smoothstep(.04,deep,h));
+  let shallow=mixColor([32,128,169],[95,207,222],smoothstep(deep,waterLine+.02,h));
+  let c=mixColor(deepC,shallow,smoothstep(deep-.03,waterLine+.01,h));
+
+  const sandC=mixColor([212,190,126],[240,221,166],sand*.35+.25);
+  c=mixColor(c,sandC,land);
+  const grassC=mixColor([96,157,77],[132,190,101],clamp(m*.50+.18,0,1));
+  c=mixColor(c,grassC,grassIn);
+  const forestC=mixColor([46,103,56],[69,139,72],clamp(m*.65,0,1));
+  c=mixColor(c,forestC,clamp(forestIn+forest*.30,0,1));
+  const mountainC=mixColor([103,108,108],[151,151,145],smoothstep(mountainLine,snowLine,h));
+  c=mixColor(c,mountainC,clamp(mountainIn+mountain*.35,0,1));
+  const snowC=[232,239,239];
+  c=mixColor(c,snowC,clamp(snowIn+snow*.45,0,1));
+  const lavaC=mixColor([113,36,21],[231,106,32],.50+.50*Math.sin(wx*.8+wy*.4));
+  c=mixColor(c,lavaC,lava);
+
+  const grain=(hash(px>>1,py>>1,worldSeed+444)-.5)*8;
+  const broad=(Math.sin(wx*.28+wy*.11)+Math.cos(wx*.15-wy*.23))*2.1;
+  let [r,g,b]=c;
+  r+=grain+broad;g+=grain*.72+broad*1.15;b+=grain*.45+broad*.32;
+
+  // brighter aqua shelf immediately around the land
+  const shelf=(1-land)*smoothstep(waterLine-.065,waterLine+.012,h);
+  g+=shelf*20;b+=shelf*28;r+=shelf*5;
+
+  return [clamp(r,0,255),clamp(g,0,255),clamp(b,0,255),land]
+}
+
 
 function hash(x,y,s=0){let n=(x*374761393+y*668265263+s*1442695041)|0;n=(n^(n>>13))*1274126177;return((n^(n>>16))>>>0)/4294967295}
 function fade(t){return t*t*(3-2*t)}
@@ -139,54 +204,30 @@ function colorFor(t,x,y,i){
 function nearType(x,y,type){for(let yy=Math.max(0,y-1);yy<=Math.min(WORLD_H-1,y+1);yy++)for(let xx=Math.max(0,x-1);xx<=Math.min(WORLD_W-1,x+1);xx++)if(terrain[idx(xx,yy)]===type)return true;return false}
 function shorelineFactor(x,y){const t=terrain[idx(x,y)];if(t!==T.WATER&&t!==T.SAND)return 0;let land=0,total=0;for(let yy=-2;yy<=2;yy++)for(let xx=-2;xx<=2;xx++){const nx=x+xx,ny=y+yy;if(nx<0||ny<0||nx>=WORLD_W||ny>=WORLD_H)continue;total++;const nt=terrain[idx(nx,ny)];if(nt>=T.SAND)land++}return land/Math.max(1,total)}
 function rebuildTerrain(){
-  const im=tctx.createImageData(terrainCanvas.width,terrainCanvas.height),d=im.data;
-  for(let y=0;y<WORLD_H;y++)for(let x=0;x<WORLD_W;x++){
-    const i=idx(x,y),t=terrain[i],[r0,g0,b0]=colorFor(t,x,y,i),shore=shorelineFactor(x,y);
-    const hl=height[idx(Math.max(0,x-1),y)],hr=height[idx(Math.min(WORLD_W-1,x+1),y)],hu=height[idx(x,Math.max(0,y-1))],hd=height[idx(x,Math.min(WORLD_H-1,y+1))];
-    const slope=((hl-hr)*88)+((hu-hd)*74);
-    const ridge=(Math.abs(hr-hl)+Math.abs(hd-hu))*92;
-    const humid=(moisture[i]-.5)*9;
-    for(let sy=0;sy<TEX;sy++)for(let sx=0;sx<TEX;sx++){
-      const nx=(sx+.5)/TEX,ny=(sy+.5)/TEX;
-      const micro=(hash(x*TEX+sx,y*TEX+sy,worldSeed+91)-.5)*7;
-      const patch=(valueNoise(x*3+nx*2,y*3+ny*2,7,worldSeed+77)-.5)*12;
-      const highlight=(1-nx)*.55+(1-ny)*.25;
-      let r=r0+micro+patch*.22+slope*.22+humid*.18+highlight;
-      let g=g0+micro+patch*.30+slope*.24+humid*.30+highlight*1.2;
-      let b=b0+micro+patch*.14+slope*.12+humid*.10+highlight*.8;
-      if(t===T.WATER||t===T.DEEP){
-        const depthTint=(t===T.DEEP?0.72:1.0);
-        b+=7+shore*22+patch*.16;
-        g+=shore*10+patch*.05;
-        r-=4*depthTint;
-      }
-      if(t===T.SAND){r+=shore*16+patch*.12;g+=shore*12+patch*.10;b+=shore*5}
-      if(t===T.GRASS){g+=4+patch*.18;b+=shore*2}
-      if(t===T.FOREST){g+=8+patch*.14;b+=2}
-      if(t===T.MOUNTAIN||t===T.SNOW){r+=ridge*.12;g+=ridge*.12;b+=ridge*.12}
-      if(t===T.LAVA){r+=26+Math.max(0,patch*.5);g+=8}
-      const p=((y*TEX+sy)*terrainCanvas.width+(x*TEX+sx))*4;
-      d[p]=clamp(r,0,255);d[p+1]=clamp(g,0,255);d[p+2]=clamp(b,0,255);d[p+3]=255;
+  const W=terrainCanvas.width,H=terrainCanvas.height,im=tctx.createImageData(W,H),d=im.data;
+  for(let py=0;py<H;py++){
+    const wy=(py+.5)/TEX-.5;
+    for(let px=0;px<W;px++){
+      const wx=(px+.5)/TEX-.5;
+      const [r,g,b,land]=paintedVisualSample(wx,wy,px,py);
+      const p=(py*W+px)*4;
+      d[p]=r;d[p+1]=g;d[p+2]=b;d[p+3]=255
     }
   }
   tctx.putImageData(im,0,0);
 
+  // Painterly broad strokes over the continuous raster.
   tctx.save();
-  tctx.globalAlpha=.20;
-  for(let y=1;y<WORLD_H-1;y++)for(let x=1;x<WORLD_W-1;x++){
-    const i=idx(x,y),t=terrain[i],shore=shorelineFactor(x,y);
-    if((t===T.WATER||t===T.DEEP)&&shore>.14&&hash(x,y,worldSeed+200)>.34){
-      tctx.fillStyle="rgba(244,251,248,.85)";
-      tctx.fillRect(x*TEX,y*TEX+(hash(x,y,worldSeed+201)>.5?0:1),TEX,1);
-    }
-    if((t===T.GRASS||t===T.FOREST)&&hash(x,y,worldSeed+202)>.93){
-      tctx.fillStyle=hash(x,y,worldSeed+203)>.72?"rgba(244,223,132,.55)":"rgba(96,152,79,.45)";
-      tctx.fillRect(x*TEX+rndi(0,Math.max(0,TEX-1)),y*TEX+rndi(0,Math.max(0,TEX-1)),1,1);
-    }
-    if(t===T.SAND&&hash(x,y,worldSeed+204)>.90){
-      tctx.fillStyle="rgba(153,124,74,.33)";
-      tctx.fillRect(x*TEX+rndi(0,Math.max(0,TEX-1)),y*TEX+rndi(0,Math.max(0,TEX-1)),1,1);
-    }
+  tctx.globalCompositeOperation="soft-light";
+  for(let y=1;y<WORLD_H-1;y+=2)for(let x=1;x<WORLD_W-1;x+=2){
+    const i=idx(x,y),t=terrain[i];
+    if(isWaterTile(t))continue;
+    const h=hash(x,y,worldSeed+910);
+    tctx.globalAlpha=.05+h*.05;
+    tctx.fillStyle=t===T.FOREST?"#2f7040":t===T.SAND?"#efd999":t===T.MOUNTAIN?"#a6aaa7":t===T.SNOW?"#ffffff":"#8fc276";
+    tctx.beginPath();
+    tctx.ellipse((x+.5)*TEX,(y+.5)*TEX,TEX*(1.2+h*.9),TEX*(.35+h*.45),h*Math.PI,0,Math.PI*2);
+    tctx.fill()
   }
   tctx.restore();
   dirty=false
@@ -1125,101 +1166,92 @@ function generate(useExistingSeed=false){
 
 function drawTrails(){const b=visibleBounds(2),step=zoom<3?3:zoom<4?2:1;ctx.save();ctx.lineCap="round";for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){const v=trail[idx(x,y)];if(v<12)continue;const s=worldToScreen(x+.5,y+.5),z=cameraScale();ctx.fillStyle=v>80?"rgba(118,88,55,.52)":`rgba(135,103,67,${Math.min(.38,v/230)})`;ctx.beginPath();ctx.ellipse(s.x,s.y,Math.max(1.4,z*.48),Math.max(1,z*.22),hash(x,y,9)*Math.PI,0,Math.PI*2);ctx.fill()}ctx.restore()}
 function drawOrganicLandOverlay(){
-  const b=visibleBounds(4),z=cameraScale(),step=zoom<2.5?2:1,phase=tick*.032;
+  const b=visibleBounds(4),z=cameraScale(),step=zoom<2.8?3:2;
   ctx.save();
   for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){
-    const i=idx(x,y),t=terrain[i];
-    if(t!==T.GRASS&&t!==T.FOREST&&t!==T.SAND&&t!==T.MOUNTAIN&&t!==T.SNOW)continue;
-    const s=worldToScreen(x+.5,y+.5),shore=tileEdgeSoftness(x,y),h=hash(x,y,worldSeed+1200),h2=hash(x,y,worldSeed+1201),v=shorelineVector(x,y,true);
-    const sweep=Math.sin(phase+x*.34+y*.20),sweep2=Math.cos(phase*.70-x*.21+y*.28),ang=h*Math.PI;
-    let base='rgba(121,186,104,.22)',mid='rgba(156,215,128,.14)',hi='rgba(208,239,163,.09)',stroke='rgba(85,142,73,.08)',r1=z*1.00,r2=z*.78;
-    if(t===T.FOREST){base='rgba(61,114,67,.24)';mid='rgba(90,149,88,.15)';hi='rgba(144,203,124,.09)';stroke='rgba(42,88,47,.09)';r1=z*.95;r2=z*.72}
-    else if(t===T.SAND){base='rgba(224,204,145,.21)';mid='rgba(245,230,183,.13)';hi='rgba(255,247,221,.09)';stroke='rgba(185,159,110,.07)';r1=z*.96;r2=z*.70}
-    else if(t===T.MOUNTAIN){base='rgba(125,133,136,.18)';mid='rgba(167,171,172,.10)';hi='rgba(212,216,216,.06)';stroke='rgba(90,96,98,.06)';r1=z*.90;r2=z*.64}
-    else if(t===T.SNOW){base='rgba(230,239,241,.22)';mid='rgba(248,251,252,.12)';hi='rgba(255,255,255,.10)';stroke='rgba(186,197,202,.06)';r1=z*.86;r2=z*.60}
-    if(shore>.12){r1+=z*.22;r2+=z*.10}
-    ctx.fillStyle=base;
+    const i=idx(x,y),t=terrain[i];if(isWaterTile(t)||t===T.LAVA)continue;
+    const h=hash(x,y,worldSeed+1200),s=worldToScreen(x+.5+(h-.5)*.38,y+.5+(hash(x,y,worldSeed+1201)-.5)*.28);
+    let col=t===T.FOREST?"rgba(54,119,63,.065)":t===T.SAND?"rgba(244,226,174,.055)":t===T.MOUNTAIN?"rgba(187,190,185,.045)":"rgba(167,210,125,.050)";
+    ctx.fillStyle=col;
     ctx.beginPath();
-    ctx.ellipse(s.x+sweep*z*.11,s.y+sweep2*z*.09,r1*(.96+h*.18),r1*(.76+h2*.16),ang,0,Math.PI*2);
-    ctx.ellipse(s.x-z*.18+sweep2*z*.10,s.y-z*.04+sweep*z*.06,r2*(.92+h2*.14),r2*(.64+h*.12),ang*.6,0,Math.PI*2);
-    ctx.ellipse(s.x+z*.16-sweep*z*.08,s.y+z*.08-sweep2*z*.06,r2*(.82+h*.12),r2*(.58+h2*.10),ang*.9,0,Math.PI*2);
-    ctx.fill();
-    ctx.fillStyle=mid;
-    ctx.beginPath();
-    ctx.ellipse(s.x-z*.16+sweep2*z*.05,s.y-z*.10+sweep*z*.05,r1*.52,r1*.28,ang*.8,0,Math.PI*2);
-    ctx.ellipse(s.x+z*.18-sweep*z*.04,s.y+z*.02-sweep2*z*.03,r1*.32,r1*.18,ang*.4,0,Math.PI*2);
-    ctx.fill();
-    if(v.count&&shore>.06){
-      ctx.fillStyle=t===T.SAND?`rgba(237,219,164,${.07+shore*.10})`:`rgba(129,193,112,${.06+shore*.10})`;
-      ctx.beginPath();
-      ctx.ellipse(s.x+v.x*z*.22,s.y+v.y*z*.22,r1*.86,r1*.34,Math.atan2(v.y,v.x),0,Math.PI*2);
-      ctx.fill();
-    }
-    if(zoom>=2.8){
-      ctx.strokeStyle=stroke;ctx.lineWidth=Math.max(1,z*.06);
-      ctx.beginPath();
-      ctx.moveTo(s.x-r1*.50+sweep*z*.12,s.y+r1*.02);
-      ctx.quadraticCurveTo(s.x+sweep2*z*.10,s.y-r1*.22,s.x+r1*.48+sweep*z*.10,s.y-r1*.02);
-      ctx.stroke();
-    }
-    if((t===T.GRASS||t===T.FOREST)&&zoom>=3.1&&h>.54){
-      ctx.fillStyle=hi;
-      ctx.beginPath();
-      ctx.arc(s.x-z*.18+sweep2*z*.04,s.y-z*.14+sweep*z*.04,z*.16,0,Math.PI*2);
-      ctx.arc(s.x+z*.11+sweep*z*.04,s.y-z*.06+sweep2*z*.03,z*.11,0,Math.PI*2);
-      ctx.arc(s.x+sweep2*z*.03,s.y+z*.08,z*.08,0,Math.PI*2);
-      ctx.fill();
-    }
+    ctx.ellipse(s.x,s.y,z*(.72+h*.30),z*(.22+h*.15),h*Math.PI,0,Math.PI*2);
+    ctx.fill()
   }
   ctx.restore()
 }
 function drawCoastalBlend(){
-  const b=visibleBounds(4),z=cameraScale(),phase=tick*.16;
+  const b=visibleBounds(4),z=cameraScale(),phase=tick*.25;
   ctx.save();
   for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y++)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x++){
-    const i=idx(x,y),t=terrain[i],shore=shorelineFactor(x,y);
-    if(shore<.08)continue;
-    const s=worldToScreen(x+.5,y+.5),waterVec=shorelineVector(x,y,true),landVec=shorelineVector(x,y,false),surge=.5+.5*Math.sin(phase+x*.55+y*.35);
+    const i=idx(x,y),t=terrain[i],shore=shorelineFactor(x,y);if(shore<.07)continue;
+    const s=worldToScreen(x+.5,y+.5),waterVec=shorelineVector(x,y,true),landVec=shorelineVector(x,y,false),surge=.5+.5*Math.sin(phase+x*.49+y*.31);
     if(isWaterTile(t)){
       const dir=landVec.count?landVec:{x:0,y:0,count:0};
-      ctx.fillStyle=`rgba(104,199,225,${.08+shore*.16})`;
-      ctx.beginPath();ctx.ellipse(s.x+dir.x*z*(.22+.11*surge),s.y+dir.y*z*(.22+.11*surge),z*(.66+shore*.54),z*(.36+shore*.28),Math.atan2(dir.y,dir.x),0,Math.PI*2);ctx.fill();
-      ctx.fillStyle=`rgba(243,252,250,${.07+shore*.18})`;
-      ctx.beginPath();ctx.ellipse(s.x+dir.x*z*(.34+.18*surge),s.y+dir.y*z*(.34+.18*surge),z*(.22+shore*.26),z*(.08+shore*.11),Math.atan2(dir.y,dir.x),0,Math.PI*2);ctx.fill();
+      ctx.fillStyle=`rgba(91,202,225,${.065+shore*.15})`;
+      ctx.beginPath();ctx.ellipse(s.x+dir.x*z*(.23+.18*surge),s.y+dir.y*z*(.23+.18*surge),z*(.70+shore*.50),z*(.32+shore*.25),Math.atan2(dir.y,dir.x),0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle=`rgba(248,254,252,${.07+shore*.19})`;ctx.lineWidth=Math.max(1,z*.07);
+      ctx.beginPath();ctx.arc(s.x+dir.x*z*(.35+.18*surge),s.y+dir.y*z*(.35+.18*surge),z*(.12+shore*.18),Math.PI*.1,Math.PI*1.2);ctx.stroke()
     }else if(t===T.GRASS||t===T.FOREST||t===T.SAND){
       const dir=waterVec.count?waterVec:{x:0,y:0,count:0};
-      ctx.fillStyle=t===T.SAND?`rgba(240,224,173,${.05+shore*.09})`:`rgba(122,194,109,${.05+shore*.08})`;
-      ctx.beginPath();ctx.ellipse(s.x+dir.x*z*.18,s.y+dir.y*z*.18,z*(.56+shore*.26),z*(.28+shore*.14),Math.atan2(dir.y,dir.x),0,Math.PI*2);ctx.fill();
+      ctx.fillStyle=t===T.SAND?`rgba(242,226,179,${.035+shore*.06})`:`rgba(134,194,107,${.025+shore*.045})`;
+      ctx.beginPath();ctx.ellipse(s.x+dir.x*z*.14,s.y+dir.y*z*.14,z*(.54+shore*.22),z*(.22+shore*.10),Math.atan2(dir.y,dir.x),0,Math.PI*2);ctx.fill()
     }
   }
   ctx.restore()
 }
 function drawWater(){
-  const b=visibleBounds(4),step=zoom<2.6?2:1,z=cameraScale(),phase=tick*.28;
-  ctx.save();ctx.lineCap='round';
+  const b=visibleBounds(5),z=cameraScale(),phase=tick*.34;
+  ctx.save();ctx.lineCap="round";
+
+  // Large traveling wave bands. They visibly move every frame.
+  const gap=5.4;
+  const startY=Math.floor(b.t/gap)*gap-8;
+  for(let wy=startY;wy<b.b+8;wy+=gap){
+    const traveling=(phase*.36)%gap;
+    const y=wy+traveling;
+    for(let wx=Math.floor(b.l/8)*8-8;wx<b.r+8;wx+=8){
+      const cx=wx+Math.sin(phase*.20+wy*.13)*2.2;
+      const tx=clamp(Math.round(cx),0,WORLD_W-1),ty=clamp(Math.round(y),0,WORLD_H-1);
+      if(!isWaterTile(terrain[idx(tx,ty)]))continue;
+      const s=worldToScreen(cx,y),curl=Math.sin(phase+wx*.22+wy*.37);
+      ctx.strokeStyle="rgba(229,247,252,.14)";
+      ctx.lineWidth=Math.max(1,z*.085);
+      ctx.beginPath();
+      ctx.moveTo(s.x-z*2.4,s.y+curl*z*.18);
+      ctx.bezierCurveTo(s.x-z*.9,s.y-curl*z*.28,s.x+z*.8,s.y+curl*z*.22,s.x+z*2.5,s.y-curl*z*.12);
+      ctx.stroke()
+    }
+  }
+
+  // Local shore surf and whitecaps.
+  const step=zoom<3?2:1;
   for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){
     const i=idx(x,y),t=terrain[i];if(!isWaterTile(t))continue;
-    const s=worldToScreen(x+.5,y+.5),shore=shorelineFactor(x,y),dir=shorelineVector(x,y,false),h=hash(x,y,worldSeed+330),wave=Math.sin(phase+x*1.10+y*.32),wave2=Math.cos(phase*.84-x*.32+y*.70),tide=.5+.5*Math.sin(phase*.70+x*.22+y*.16);
-    const len=z*(.68+h*.92+shore*.34),offset=wave*z*(.22+.12*shore);
-    ctx.strokeStyle=`rgba(229,246,252,${.12+shore*.12})`;
-    ctx.lineWidth=Math.max(1,z*.10);
-    ctx.beginPath();ctx.moveTo(s.x-len+offset,s.y+wave2*z*.09);ctx.quadraticCurveTo(s.x+dir.x*z*.18,s.y-wave2*z*(.22+.12*shore),s.x+len+offset,s.y+wave*z*.08);ctx.stroke();
-    if(h>.30){
-      ctx.strokeStyle=`rgba(185,227,242,${.10+shore*.10})`;
-      ctx.lineWidth=Math.max(1,z*.07);
-      ctx.beginPath();ctx.moveTo(s.x-len*.56-offset*.38,s.y+z*.20+wave2*z*.08);ctx.quadraticCurveTo(s.x,s.y+z*.02-wave*z*.12,s.x+len*.56-offset*.38,s.y+z*.18+wave2*z*.05);ctx.stroke();
+    const shore=shorelineFactor(x,y),dir=shorelineVector(x,y,false),h=hash(x,y,worldSeed+333);
+    const wave=Math.sin(phase+x*.82+y*.31),wave2=Math.cos(phase*.73-x*.26+y*.55),tide=.5+.5*Math.sin(phase*.40+x*.13+y*.09);
+    const s=worldToScreen(x+.5+wave*.08,y+.5+wave2*.04);
+
+    if(shore>.05){
+      ctx.fillStyle=`rgba(104,210,232,${.055+shore*.13})`;
+      ctx.beginPath();
+      ctx.ellipse(s.x+dir.x*z*(.12+.12*tide),s.y+dir.y*z*(.12+.12*tide),z*(.36+shore*.32+tide*.10),z*(.18+shore*.16),Math.atan2(dir.y,dir.x),0,Math.PI*2);
+      ctx.fill()
     }
-    if(shore>.06){
-      ctx.fillStyle=`rgba(124,214,237,${.08+shore*.13})`;
-      ctx.beginPath();ctx.arc(s.x+dir.x*z*.14+wave*z*.05,s.y+dir.y*z*.12+wave2*z*.04,z*(.28+shore*.26+tide*.08),0,Math.PI*2);ctx.fill();
+    if(shore>.14&&h>.18){
+      ctx.strokeStyle=`rgba(251,254,251,${.12+shore*.25})`;
+      ctx.lineWidth=Math.max(1,z*.085);
+      ctx.beginPath();
+      ctx.arc(s.x+dir.x*z*(.22+.15*tide),s.y+dir.y*z*(.22+.15*tide),z*(.15+shore*.17),Math.PI*.05,Math.PI*1.15);
+      ctx.stroke()
     }
-    if(shore>.14){
-      ctx.strokeStyle=`rgba(248,252,250,${.11+shore*.22})`;
-      ctx.lineWidth=Math.max(1,z*.10);
-      ctx.beginPath();ctx.arc(s.x+dir.x*z*(.22+.12*tide),s.y+dir.y*z*(.22+.12*tide),z*(.18+shore*.20),Math.PI*.08,Math.PI*1.12);ctx.stroke();
-      ctx.beginPath();ctx.arc(s.x+dir.x*z*(.34+.16*tide),s.y+dir.y*z*(.34+.16*tide),z*(.08+shore*.12),Math.PI*.16,Math.PI*1.10);ctx.stroke();
+    if(h>.73){
+      ctx.strokeStyle="rgba(232,247,252,.13)";
+      ctx.lineWidth=Math.max(1,z*.055);
+      ctx.beginPath();
+      ctx.moveTo(s.x-z*.35,s.y);
+      ctx.quadraticCurveTo(s.x,s.y-wave*z*.16,s.x+z*.38,s.y+wave2*z*.05);
+      ctx.stroke()
     }
-    if(t===T.DEEP&&h>.54){ctx.fillStyle='rgba(255,255,255,.05)';ctx.fillRect(s.x-z*.42+offset*.22,s.y+wave2*z*.12,z*.84,Math.max(1,z*.05))}
   }
   ctx.restore()
 }
@@ -1268,64 +1300,78 @@ function forestDensity(x,y){
   }
   return n/9
 }
+function treeJitter(x,y){
+  return {x:(hash(x,y,1701)-.5)*.70,y:(hash(x,y,1702)-.5)*.48,scale:.82+hash(x,y,1703)*.38}
+}
+function drawPineTree(x,y){
+  const j=treeJitter(x,y),s=worldToScreen(x+.5+j.x,y+.63+j.y),z=clamp(cameraScale(),2.6,13)*j.scale,sway=Math.sin(tick*.025+x*.61+y*.28)*z*.06;
+  ctx.fillStyle="rgba(0,0,0,.20)";ctx.beginPath();ctx.ellipse(s.x+z*.12,s.y+z*.86,z*.62,z*.20,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#68482f";ctx.fillRect(s.x-z*.07,s.y-z*.02,z*.14,z*.92);
+  const layers=[[-.83,.62],[-.49,.77],[-.10,.92]];
+  for(let n=0;n<layers.length;n++){
+    const [yy,w]=layers[n];
+    ctx.fillStyle=n===0?"#2b633b":n===1?"#28603a":"#347347";
+    ctx.beginPath();
+    ctx.moveTo(s.x+sway,s.y+z*(yy-.52));
+    ctx.lineTo(s.x-z*w+sway,s.y+z*(yy+.45));
+    ctx.quadraticCurveTo(s.x,s.y+z*(yy+.25),s.x+z*w+sway,s.y+z*(yy+.45));
+    ctx.closePath();ctx.fill()
+  }
+  ctx.fillStyle="rgba(138,204,135,.42)";ctx.beginPath();ctx.arc(s.x-z*.14+sway,s.y-z*.72,z*.10,0,Math.PI*2);ctx.fill()
+}
+function drawBroadleafTree(x,y){
+  const j=treeJitter(x,y),s=worldToScreen(x+.5+j.x,y+.62+j.y),z=clamp(cameraScale(),2.6,13)*j.scale,sway=Math.sin(tick*.026+x*.58+y*.27)*z*.08,h=hash(x,y,1777);
+  ctx.fillStyle="rgba(0,0,0,.20)";ctx.beginPath();ctx.ellipse(s.x+z*.10,s.y+z*.93,z*.78,z*.23,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle=h>.5?"#704b30":"#7d5736";ctx.fillRect(s.x-z*.10,s.y-z*.02,z*.20,z*1.02);
+  ctx.fillStyle=h>.58?"#347845":"#3d8448";
+  ctx.beginPath();
+  ctx.arc(s.x-z*.30+sway,s.y-z*.36,z*.43,0,Math.PI*2);
+  ctx.arc(s.x+z*.08+sway,s.y-z*.56,z*.51,0,Math.PI*2);
+  ctx.arc(s.x+z*.38+sway,s.y-z*.30,z*.38,0,Math.PI*2);
+  ctx.arc(s.x+sway,s.y-z*.14,z*.47,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="rgba(158,215,126,.50)";
+  ctx.beginPath();ctx.arc(s.x-z*.12+sway,s.y-z*.59,z*.17,0,Math.PI*2);ctx.arc(s.x+z*.23+sway,s.y-z*.42,z*.13,0,Math.PI*2);ctx.fill()
+}
 function drawForestClump(x,y){
-  const s=worldToScreen(x+.5,y+.68),z=clamp(cameraScale(),2.2,8.5),hue=hash(x,y,worldSeed+770),d=forestDensity(x,y),sway=Math.sin(tick*.030+x*.53+y*.31)*z*.06;
-  ctx.fillStyle='rgba(0,0,0,.17)';
-  ctx.beginPath();ctx.ellipse(s.x,s.y+z*.34,z*(.88+.18*d),z*.28,0,0,Math.PI*2);ctx.fill();
-  const dark=hue>.60?'#2a6134':'#316b3b',mid=hue>.60?'#387e49':'#428b4f';
-  ctx.fillStyle=dark;ctx.beginPath();
-  ctx.arc(s.x-z*.30+sway,s.y-z*.06,z*(.30+.10*d),0,Math.PI*2);
-  ctx.arc(s.x+z*.02+sway,s.y-z*.18,z*(.36+.12*d),0,Math.PI*2);
-  ctx.arc(s.x+z*.32+sway,s.y-z*.03,z*(.28+.09*d),0,Math.PI*2);
-  ctx.arc(s.x-z*.06+sway,s.y+z*.03,z*(.31+.10*d),0,Math.PI*2);
-  ctx.fill();
-  ctx.fillStyle=mid;ctx.beginPath();
-  ctx.arc(s.x-z*.18+sway,s.y-z*.16,z*.16,0,Math.PI*2);
-  ctx.arc(s.x+z*.14+sway,s.y-z*.10,z*.14,0,Math.PI*2);
-  ctx.arc(s.x+z*.02+sway,s.y-z*.28,z*.12,0,Math.PI*2);
-  ctx.fill();
+  const j=treeJitter(x,y),s=worldToScreen(x+.5+j.x,y+.64+j.y),z=clamp(cameraScale(),2.0,7.4)*j.scale,h=hash(x,y,worldSeed+770),d=forestDensity(x,y),sway=Math.sin(tick*.025+x*.53+y*.31)*z*.04;
+  ctx.fillStyle="rgba(0,0,0,.15)";ctx.beginPath();ctx.ellipse(s.x,s.y+z*.30,z*(.72+.12*d),z*.19,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle=h>.62?"#2c6539":"#367443";
+  ctx.beginPath();
+  ctx.arc(s.x-z*.23+sway,s.y-z*.06,z*(.24+.07*d),0,Math.PI*2);
+  ctx.arc(s.x+z*.01+sway,s.y-z*.15,z*(.29+.08*d),0,Math.PI*2);
+  ctx.arc(s.x+z*.24+sway,s.y-z*.02,z*(.23+.06*d),0,Math.PI*2);
+  ctx.arc(s.x-z*.01+sway,s.y+z*.02,z*(.26+.06*d),0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="rgba(146,207,118,.45)";ctx.beginPath();ctx.arc(s.x-z*.07+sway,s.y-z*.18,z*.10,0,Math.PI*2);ctx.fill()
 }
 
 function drawTree(x,y){
-  const s=worldToScreen(x+.5,y+.62),z=clamp(cameraScale(),2.8,14),sway=Math.sin(tick*.028+x*.58+y*.27)*z*.11,hue=hash(x,y,worldSeed+777),d=forestDensity(x,y);
-  if(z<5.3){drawForestClump(x,y);return}
-  ctx.fillStyle='rgba(0,0,0,.20)';ctx.beginPath();ctx.ellipse(s.x+z*.12,s.y+z*1.08,z*(1.02+.10*d),z*.32,-.1,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle=hue>.55?'#6e4b31':'#7a5637';
-  ctx.beginPath();ctx.roundRect?ctx.roundRect(s.x-z*.12,s.y-z*.02,z*.24,z*1.28,z*.06):ctx.rect(s.x-z*.12,s.y-z*.02,z*.24,z*1.28);ctx.fill();
-  const dark=hue>.72?'#235631':hue>.42?'#2a6135':'#326d3d',mid=hue>.72?'#347744':'#3c824a',hi=hue>.72?'rgba(141,208,128,.72)':'rgba(123,198,117,.70)';
-  ctx.fillStyle=dark;ctx.beginPath();
-  ctx.ellipse(s.x+sway,s.y-z*.60,z*(.84+.16*d),z*(.72+.08*d),0,0,Math.PI*2);
-  ctx.ellipse(s.x-z*.56+sway,s.y-z*.26,z*.56,z*.48,0,0,Math.PI*2);
-  ctx.ellipse(s.x+z*.56+sway,s.y-z*.24,z*.58,z*.50,0,0,Math.PI*2);
-  ctx.ellipse(s.x,s.y-z*.02,z*.66,z*.50,0,0,Math.PI*2);
-  ctx.fill();
-  ctx.fillStyle=mid;ctx.beginPath();
-  ctx.arc(s.x-z*.24+sway,s.y-z*.78,z*.40,0,Math.PI*2);
-  ctx.arc(s.x+z*.24+sway,s.y-z*.66,z*.34,0,Math.PI*2);
-  ctx.arc(s.x+sway,s.y-z*.40,z*.28,0,Math.PI*2);
-  ctx.arc(s.x-z*.02+sway,s.y-z*.18,z*.20,0,Math.PI*2);
-  ctx.fill();
-  ctx.fillStyle=hi;ctx.beginPath();
-  ctx.arc(s.x-z*.24+sway,s.y-z*.82,z*.14,0,Math.PI*2);
-  ctx.arc(s.x+z*.20+sway,s.y-z*.68,z*.12,0,Math.PI*2);
-  ctx.arc(s.x+sway,s.y-z*.48,z*.10,0,Math.PI*2);
-  ctx.fill();
+  if(cameraScale()<5.1){drawForestClump(x,y);return}
+  if(hash(x,y,worldSeed+1800)>.52)drawPineTree(x,y);else drawBroadleafTree(x,y)
 }
 function drawTerrainFeatures(){
-  const b=visibleBounds(4),camZ=cameraScale(),step=camZ<3?2:1;
+  const b=visibleBounds(5),camZ=cameraScale(),step=camZ<3?2:1;
   for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){
-    const i=idx(x,y),t=terrain[i],s=worldToScreen(x+.5,y+.7),z=clamp(camZ,2,11)*.72;
+    const i=idx(x,y),t=terrain[i],gate=hash(x,y,88);
     if(t===T.FOREST&&trees[i]>0){
-      const d=forestDensity(x,y),gate=hash(x,y,88);
-      if(camZ<5.0){if(gate>.66-d*.12)drawForestClump(x,y)}
-      else if(gate>.14)drawTree(x,y)
+      const d=forestDensity(x,y);
+      if(camZ<5.0){if(gate>.69-d*.13)drawForestClump(x,y)}
+      else if(gate>.18)drawTree(x,y)
     }
+
+    // Coastline boulders make the shoreline feel like a miniature landscape.
+    const shore=shorelineFactor(x,y);
+    if((t===T.SAND||t===T.GRASS)&&shore>.18&&hash(x,y,worldSeed+1888)>.91){
+      const j=treeJitter(x,y),s=worldToScreen(x+.5+j.x*.6,y+.55+j.y*.4),z=clamp(camZ,2.5,11);
+      ctx.fillStyle="rgba(0,0,0,.18)";ctx.beginPath();ctx.ellipse(s.x+z*.08,s.y+z*.20,z*.34,z*.13,0,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle="#777d7c";ctx.beginPath();ctx.moveTo(s.x-z*.30,s.y+z*.12);ctx.lineTo(s.x-z*.12,s.y-z*.25);ctx.lineTo(s.x+z*.18,s.y-z*.16);ctx.lineTo(s.x+z*.31,s.y+z*.12);ctx.closePath();ctx.fill();
+      ctx.fillStyle="#afb4b0";ctx.beginPath();ctx.moveTo(s.x-z*.10,s.y-z*.20);ctx.lineTo(s.x+z*.05,s.y-z*.15);ctx.lineTo(s.x+z*.15,s.y-z*.04);ctx.closePath();ctx.fill()
+    }
+
     if((t===T.MOUNTAIN||t===T.SNOW)&&hash(x,y,610)>.44){
-      ctx.fillStyle='rgba(0,0,0,.22)';ctx.beginPath();ctx.ellipse(s.x+z*.26,s.y+z*.88,z*1.0,z*.28,0,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle=t===T.SNOW?'#c7d0d3':'#7b817c';
-      ctx.beginPath();ctx.moveTo(s.x-z*.95,s.y+z*.72);ctx.lineTo(s.x-z*.34,s.y-z*.26);ctx.lineTo(s.x,s.y-z*1.28);ctx.lineTo(s.x+z*.42,s.y-z*.20);ctx.lineTo(s.x+z*.95,s.y+z*.72);ctx.fill();
-      ctx.fillStyle=t===T.SNOW?'#eff5f6':'#aab0ad';ctx.beginPath();ctx.moveTo(s.x,s.y-z*1.28);ctx.lineTo(s.x-z*.28,s.y-z*.62);ctx.lineTo(s.x+z*.18,s.y-z*.54);ctx.lineTo(s.x+z*.36,s.y-z*.18);ctx.fill();
-      ctx.fillStyle='rgba(255,255,255,.14)';ctx.beginPath();ctx.moveTo(s.x-z*.08,s.y-z*.96);ctx.lineTo(s.x+z*.10,s.y-z*.58);ctx.lineTo(s.x+z*.28,s.y-z*.86);ctx.fill();
+      const s=worldToScreen(x+.5+(hash(x,y,611)-.5)*.35,y+.72+(hash(x,y,612)-.5)*.20),z=clamp(camZ,2,11)*.72;
+      ctx.fillStyle="rgba(0,0,0,.22)";ctx.beginPath();ctx.ellipse(s.x+z*.22,s.y+z*.86,z*.92,z*.25,0,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle=t===T.SNOW?"#ccd4d6":"#7c8382";ctx.beginPath();ctx.moveTo(s.x-z*.90,s.y+z*.68);ctx.lineTo(s.x-z*.32,s.y-z*.22);ctx.lineTo(s.x,s.y-z*1.20);ctx.lineTo(s.x+z*.40,s.y-z*.18);ctx.lineTo(s.x+z*.90,s.y+z*.68);ctx.fill();
+      ctx.fillStyle=t===T.SNOW?"#f2f6f7":"#adb3b1";ctx.beginPath();ctx.moveTo(s.x,s.y-z*1.20);ctx.lineTo(s.x-z*.26,s.y-z*.57);ctx.lineTo(s.x+z*.16,s.y-z*.50);ctx.lineTo(s.x+z*.34,s.y-z*.17);ctx.fill()
     }
   }
 }
@@ -1351,17 +1397,41 @@ function drawBuilding(b){
 }
 function drawPerson(p){
   if(!p.alive)return;
-  const s=worldToScreen(p.px,p.py),base=clamp(cameraScale(),3,14),child=p.age<14,scale=child?.72:1,z=base*scale,bob=Math.sin(p.phase)*z*.08;
-  const skins=['#f1c494','#dca372','#be7e56','#7d4d36'],tunics=['#5d819d','#828a53','#83654c','#75649a','#4f816d','#a06f5d'],hairs=['#251d1a','#5c3f2b','#1b1a19','#8a6739','#6a2f29'];
-  ctx.fillStyle='rgba(0,0,0,.18)';ctx.beginPath();ctx.ellipse(s.x+z*.08,s.y+z*1.16,z*.68,z*.22,0,0,Math.PI*2);ctx.fill();
-  const body=ctx.createLinearGradient(s.x,s.y-z*.10,s.x,s.y+z*1.0);body.addColorStop(0,tunics[p.shirt]);body.addColorStop(1,'rgba(20,20,20,.14)');ctx.fillStyle=body;ctx.beginPath();ctx.moveTo(s.x-z*.38,s.y-z*.04+bob);ctx.quadraticCurveTo(s.x,s.y-z*.16+bob,s.x+z*.38,s.y-z*.04+bob);ctx.lineTo(s.x+z*.26,s.y+z*.82+bob);ctx.lineTo(s.x-z*.26,s.y+z*.82+bob);ctx.closePath();ctx.fill();
-  ctx.strokeStyle='rgba(255,255,255,.10)';ctx.lineWidth=Math.max(1,z*.05);ctx.beginPath();ctx.moveTo(s.x,s.y-z*.02+bob);ctx.lineTo(s.x,s.y+z*.80+bob);ctx.stroke();
-  ctx.strokeStyle=skins[p.skin];ctx.lineWidth=Math.max(1,z*.08);ctx.beginPath();ctx.moveTo(s.x-z*.16,s.y+z*.82+bob);ctx.lineTo(s.x-z*.14,s.y+z*1.22+bob);ctx.moveTo(s.x+z*.16,s.y+z*.82+bob);ctx.lineTo(s.x+z*.14,s.y+z*1.22+bob);ctx.moveTo(s.x-z*.36,s.y+z*.12+bob);ctx.lineTo(s.x-z*.62,s.y+z*.34+bob);ctx.moveTo(s.x+z*.36,s.y+z*.12+bob);ctx.lineTo(s.x+z*.62,s.y+z*.34+bob);ctx.stroke();
-  ctx.fillStyle=skins[p.skin];ctx.beginPath();ctx.arc(s.x,s.y-z*.52+bob,z*.32,0,Math.PI*2);ctx.fill();ctx.fillStyle=hairs[p.hair];ctx.beginPath();ctx.arc(s.x,s.y-z*.60+bob,z*.35,Math.PI,Math.PI*2);ctx.fill();ctx.beginPath();ctx.moveTo(s.x-z*.22,s.y-z*.52+bob);ctx.quadraticCurveTo(s.x,s.y-z*.84+bob,s.x+z*.20,s.y-z*.54+bob);ctx.lineTo(s.x+z*.12,s.y-z*.26+bob);ctx.lineTo(s.x-z*.18,s.y-z*.30+bob);ctx.fill();
-  if(base>6){ctx.fillStyle='#2c231f';ctx.beginPath();ctx.arc(s.x-z*.08,s.y-z*.52+bob,z*.025,0,Math.PI*2);ctx.arc(s.x+z*.08,s.y-z*.52+bob,z*.025,0,Math.PI*2);ctx.fill();ctx.strokeStyle='rgba(94,56,44,.45)';ctx.lineWidth=Math.max(1,z*.03);ctx.beginPath();ctx.moveTo(s.x-z*.06,s.y-z*.42+bob);ctx.quadraticCurveTo(s.x,s.y-z*.38+bob,s.x+z*.06,s.y-z*.42+bob);ctx.stroke()}
-  if(p.carryAmount>0){ctx.fillStyle=p.carryType==='food'?'#c74f45':p.carryType==='wood'?'#8c5c38':p.carryType==='iron'?'#a66d60':p.carryType==='gold'?'#ddc15b':p.carryType==='coal'?'#2e2e31':'#97a1a5';ctx.beginPath();ctx.ellipse(s.x+p.dir*z*.70,s.y+z*.22,z*.18,z*.14,0,0,Math.PI*2);ctx.fill();ctx.strokeStyle='rgba(255,255,255,.14)';ctx.lineWidth=Math.max(1,z*.04);ctx.beginPath();ctx.moveTo(s.x+p.dir*z*.56,s.y+z*.16);ctx.lineTo(s.x+p.dir*z*.74,s.y+z*.28);ctx.stroke()}
-  if(p.id===selected){ctx.strokeStyle='#f7ffed';ctx.lineWidth=2;ctx.beginPath();ctx.arc(s.x,s.y,z*1.6,0,Math.PI*2);ctx.stroke();ctx.fillStyle='rgba(177,231,138,.10)';ctx.beginPath();ctx.arc(s.x,s.y,z*1.6,0,Math.PI*2);ctx.fill()}
-  if(settings.labels&&zoom>=7.3&&!child){ctx.font=`700 ${Math.round(base)}px -apple-system,system-ui`;ctx.textAlign='center';ctx.strokeStyle='rgba(0,0,0,.45)';ctx.lineWidth=Math.max(2,base*.22);ctx.strokeText(p.name,s.x,s.y-z*1.66);ctx.fillStyle='#fbfffb';ctx.fillText(p.name,s.x,s.y-z*1.66)}
+  const s=worldToScreen(p.px,p.py),base=clamp(cameraScale(),3,14),child=p.age<14,z=base*(child?.70:1),bob=Math.sin(p.phase)*z*.07;
+  const skins=["#f1c494","#dca372","#be7e56","#7d4d36"],tunics=["#5d819d","#828a53","#83654c","#75649a","#4f816d","#a06f5d"],hairs=["#251d1a","#5c3f2b","#1b1a19","#8a6739","#6a2f29"];
+  ctx.fillStyle="rgba(0,0,0,.18)";ctx.beginPath();ctx.ellipse(s.x+z*.08,s.y+z*1.06,z*.57,z*.17,0,0,Math.PI*2);ctx.fill();
+
+  ctx.strokeStyle=skins[p.skin];ctx.lineWidth=Math.max(1,z*.075);
+  ctx.beginPath();
+  ctx.moveTo(s.x-z*.13,s.y+z*.67+bob);ctx.lineTo(s.x-z*.16,s.y+z*1.05+bob);
+  ctx.moveTo(s.x+z*.13,s.y+z*.67+bob);ctx.lineTo(s.x+z*.16,s.y+z*1.05+bob);
+  ctx.stroke();
+
+  const body=ctx.createLinearGradient(s.x,s.y-z*.12,s.x,s.y+z*.82);body.addColorStop(0,tunics[p.shirt]);body.addColorStop(1,"rgba(30,25,25,.20)");
+  ctx.fillStyle=body;ctx.beginPath();
+  ctx.moveTo(s.x-z*.31,s.y-z*.02+bob);ctx.quadraticCurveTo(s.x,s.y-z*.15+bob,s.x+z*.31,s.y-z*.02+bob);
+  ctx.lineTo(s.x+z*.22,s.y+z*.72+bob);ctx.lineTo(s.x-z*.22,s.y+z*.72+bob);ctx.closePath();ctx.fill();
+
+  ctx.strokeStyle=skins[p.skin];ctx.lineWidth=Math.max(1,z*.065);ctx.beginPath();
+  ctx.moveTo(s.x-z*.29,s.y+z*.12+bob);ctx.lineTo(s.x-z*.51,s.y+z*.30+bob);
+  ctx.moveTo(s.x+z*.29,s.y+z*.12+bob);ctx.lineTo(s.x+z*.51,s.y+z*.30+bob);ctx.stroke();
+
+  ctx.fillStyle=skins[p.skin];ctx.beginPath();ctx.arc(s.x,s.y-z*.47+bob,z*.27,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle=hairs[p.hair];ctx.beginPath();ctx.arc(s.x,s.y-z*.55+bob,z*.30,Math.PI,Math.PI*2);ctx.fill();
+  if(base>6){
+    ctx.fillStyle="#28211f";ctx.beginPath();ctx.arc(s.x-z*.07,s.y-z*.47+bob,z*.022,0,Math.PI*2);ctx.arc(s.x+z*.07,s.y-z*.47+bob,z*.022,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle="rgba(110,68,49,.45)";ctx.lineWidth=Math.max(1,z*.025);ctx.beginPath();ctx.moveTo(s.x-z*.05,s.y-z*.38+bob);ctx.quadraticCurveTo(s.x,s.y-z*.35+bob,s.x+z*.05,s.y-z*.38+bob);ctx.stroke()
+  }
+  if(p.carryAmount>0){
+    ctx.fillStyle=p.carryType==="food"?"#c84e45":p.carryType==="wood"?"#8d5e39":p.carryType==="gold"?"#dfc35c":"#969fa2";
+    ctx.beginPath();ctx.ellipse(s.x+p.dir*z*.57,s.y+z*.21,z*.15,z*.12,0,0,Math.PI*2);ctx.fill()
+  }
+  if(p.id===selected){ctx.strokeStyle="#f7ffed";ctx.lineWidth=2;ctx.beginPath();ctx.arc(s.x,s.y,z*1.42,0,Math.PI*2);ctx.stroke()}
+  if(settings.labels&&zoom>=7.5&&!child){
+    ctx.font=`700 ${Math.round(base*.95)}px -apple-system,system-ui`;ctx.textAlign="center";
+    ctx.strokeStyle="rgba(0,0,0,.52)";ctx.lineWidth=Math.max(2,base*.22);ctx.strokeText(p.name,s.x,s.y-z*1.50);
+    ctx.fillStyle="#fff";ctx.fillText(p.name,s.x,s.y-z*1.50)
+  }
 }
 function drawUndergroundResources(){
   const b=visibleBounds(3),step=zoom<3?3:zoom<5?2:1,z=cameraScale();
@@ -1411,11 +1481,32 @@ function renderUnderground(){
   const topGlow=ctx.createLinearGradient(0,0,0,canvas.height*.28);topGlow.addColorStop(0,"rgba(255,190,88,.08)");topGlow.addColorStop(1,"rgba(0,0,0,0)");ctx.fillStyle=topGlow;ctx.fillRect(0,0,canvas.width,canvas.height);drawVignette();drawMiniMap()
 }
 function drawCritter(c){
-  const s=worldToScreen(c.px,c.py),base=clamp(cameraScale(),2.8,12),z=base*.92,bob=Math.sin(c.phase)*z*.05,dir=c.dir||1;
-  ctx.fillStyle='rgba(0,0,0,.16)';ctx.beginPath();ctx.ellipse(s.x+z*.06,s.y+z*.56,z*.66,z*.18,0,0,Math.PI*2);ctx.fill();
-  if(c.type==='sheep'){ctx.fillStyle='#ede8dd';ctx.beginPath();ctx.arc(s.x-z*.16,s.y-z*.02+bob,z*.20,0,Math.PI*2);ctx.arc(s.x+.02*z,s.y-z*.10+bob,z*.22,0,Math.PI*2);ctx.arc(s.x+z*.18,s.y+bob,z*.20,0,Math.PI*2);ctx.arc(s.x,s.y+z*.06+bob,z*.24,0,Math.PI*2);ctx.fill();ctx.fillStyle='#59534b';ctx.beginPath();ctx.ellipse(s.x+dir*z*.40,s.y-z*.06+bob,z*.17,z*.13,0,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.moveTo(s.x+dir*z*.34,s.y-z*.14+bob);ctx.lineTo(s.x+dir*z*.44,s.y-z*.28+bob);ctx.lineTo(s.x+dir*z*.52,s.y-z*.12+bob);ctx.fill();ctx.beginPath();ctx.moveTo(s.x+dir*z*.28,s.y-z*.12+bob);ctx.lineTo(s.x+dir*z*.38,s.y-z*.26+bob);ctx.lineTo(s.x+dir*z*.46,s.y-z*.10+bob);ctx.fill();ctx.strokeStyle='#6a645c';ctx.lineWidth=Math.max(1,z*.07);for(const lx of[-.18,.02,.20]){ctx.beginPath();ctx.moveTo(s.x+lx*z,s.y+z*.12+bob);ctx.lineTo(s.x+lx*z,s.y+z*.50+bob);ctx.stroke()}ctx.fillStyle='rgba(255,255,255,.35)';ctx.beginPath();ctx.arc(s.x-z*.08,s.y-z*.09+bob,z*.06,0,Math.PI*2);ctx.fill();return}
-  if(c.type==='wolf'){ctx.fillStyle='#6c7479';ctx.beginPath();ctx.ellipse(s.x,s.y+bob,z*.46,z*.24,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#555d62';ctx.beginPath();ctx.ellipse(s.x+dir*z*.42,s.y-z*.08+bob,z*.18,z*.13,0,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.moveTo(s.x+dir*z*.36,s.y-z*.12+bob);ctx.lineTo(s.x+dir*z*.46,s.y-z*.30+bob);ctx.lineTo(s.x+dir*z*.56,s.y-z*.12+bob);ctx.fill();ctx.beginPath();ctx.moveTo(s.x+dir*z*.22,s.y-z*.10+bob);ctx.lineTo(s.x+dir*z*.32,s.y-z*.28+bob);ctx.lineTo(s.x+dir*z*.42,s.y-z*.10+bob);ctx.fill();ctx.strokeStyle='#53595e';ctx.lineWidth=Math.max(1,z*.07);for(const lx of[-.20,.00,.18]){ctx.beginPath();ctx.moveTo(s.x+lx*z,s.y+z*.10+bob);ctx.lineTo(s.x+lx*z,s.y+z*.48+bob);ctx.stroke()}ctx.beginPath();ctx.moveTo(s.x-dir*z*.40,s.y-z*.02+bob);ctx.lineTo(s.x-dir*z*.60,s.y-z*.14+bob);ctx.stroke();return}
-  ctx.fillStyle='#976740';ctx.beginPath();ctx.ellipse(s.x,s.y+bob,z*.44,z*.22,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#8a5a35';ctx.beginPath();ctx.ellipse(s.x+dir*z*.38,s.y-z*.10+bob,z*.16,z*.12,0,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#6d472e';ctx.lineWidth=Math.max(1,z*.07);for(const lx of[-.18,.04,.22]){ctx.beginPath();ctx.moveTo(s.x+lx*z,s.y+z*.08+bob);ctx.lineTo(s.x+lx*z,s.y+z*.48+bob);ctx.stroke()}ctx.beginPath();ctx.moveTo(s.x-dir*z*.40,s.y-z*.02+bob);ctx.lineTo(s.x-dir*z*.56,s.y-z*.14+bob);ctx.stroke();ctx.beginPath();ctx.moveTo(s.x+dir*z*.26,s.y-z*.08+bob);ctx.lineTo(s.x+dir*z*.12,s.y-z*.24+bob);ctx.stroke();ctx.fillStyle='#724a31';ctx.beginPath();ctx.moveTo(s.x+dir*z*.38,s.y-z*.18+bob);ctx.lineTo(s.x+dir*z*.48,s.y-z*.34+bob);ctx.lineTo(s.x+dir*z*.46,s.y-z*.12+bob);ctx.fill();ctx.beginPath();ctx.moveTo(s.x+dir*z*.28,s.y-z*.16+bob);ctx.lineTo(s.x+dir*z*.38,s.y-z*.32+bob);ctx.lineTo(s.x+dir*z*.36,s.y-z*.10+bob);ctx.fill()
+  const s=worldToScreen(c.px,c.py),base=clamp(cameraScale(),2.8,12),z=base*.88,bob=Math.sin(c.phase*1.15)*z*.045,dir=c.dir||1;
+  ctx.fillStyle="rgba(0,0,0,.16)";ctx.beginPath();ctx.ellipse(s.x+z*.05,s.y+z*.48,z*.58,z*.14,0,0,Math.PI*2);ctx.fill();
+
+  if(c.type==="sheep"){
+    ctx.fillStyle="#eee9df";ctx.beginPath();
+    ctx.arc(s.x-z*.18,s.y-z*.02+bob,z*.18,0,Math.PI*2);ctx.arc(s.x,s.y-z*.10+bob,z*.21,0,Math.PI*2);ctx.arc(s.x+z*.18,s.y+bob,z*.18,0,Math.PI*2);ctx.arc(s.x,s.y+z*.05+bob,z*.22,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#565149";ctx.beginPath();ctx.ellipse(s.x+dir*z*.36,s.y-z*.07+bob,z*.15,z*.11,0,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle="#665f57";ctx.lineWidth=Math.max(1,z*.06);for(const lx of[-.16,.04,.18]){ctx.beginPath();ctx.moveTo(s.x+lx*z,s.y+z*.10+bob);ctx.lineTo(s.x+lx*z,s.y+z*.43+bob);ctx.stroke()}
+    return
+  }
+
+  if(c.type==="wolf"){
+    ctx.fillStyle="#687176";ctx.beginPath();ctx.ellipse(s.x,s.y+bob,z*.39,z*.19,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#50595e";ctx.beginPath();ctx.ellipse(s.x+dir*z*.37,s.y-z*.09+bob,z*.16,z*.10,0,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.moveTo(s.x+dir*z*.31,s.y-z*.14+bob);ctx.lineTo(s.x+dir*z*.39,s.y-z*.28+bob);ctx.lineTo(s.x+dir*z*.47,s.y-z*.12+bob);ctx.fill();
+    ctx.strokeStyle="#50575b";ctx.lineWidth=Math.max(1,z*.06);for(const lx of[-.17,.02,.17]){ctx.beginPath();ctx.moveTo(s.x+lx*z,s.y+z*.08+bob);ctx.lineTo(s.x+lx*z,s.y+z*.40+bob);ctx.stroke()}
+    ctx.beginPath();ctx.moveTo(s.x-dir*z*.37,s.y-z*.02+bob);ctx.lineTo(s.x-dir*z*(.55+.08*Math.sin(c.phase)),s.y-z*.13+bob);ctx.stroke();return
+  }
+
+  // deer
+  ctx.fillStyle="#a36b3e";ctx.beginPath();ctx.ellipse(s.x,s.y+bob,z*.39,z*.18,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#8d5933";ctx.beginPath();ctx.ellipse(s.x+dir*z*.34,s.y-z*.12+bob,z*.14,z*.10,0,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#76492e";ctx.lineWidth=Math.max(1,z*.055);
+  for(const lx of[-.16,.04,.18]){ctx.beginPath();ctx.moveTo(s.x+lx*z,s.y+z*.06+bob);ctx.lineTo(s.x+lx*z,s.y+z*.40+bob);ctx.stroke()}
+  ctx.beginPath();ctx.moveTo(s.x+dir*z*.25,s.y-z*.10+bob);ctx.lineTo(s.x+dir*z*.10,s.y-z*.24+bob);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(s.x+dir*z*.32,s.y-z*.18+bob);ctx.lineTo(s.x+dir*z*.39,s.y-z*.34+bob);ctx.moveTo(s.x+dir*z*.39,s.y-z*.30+bob);ctx.lineTo(s.x+dir*z*.47,s.y-z*.39+bob);ctx.stroke()
 }
 function drawHazards(){
   const b=visibleBounds(2),z=cameraScale();
@@ -1611,8 +1702,8 @@ function settingsHtml(){
   <div class="menuSection">World management</div><button class="bigAction" data-action="center-world" type="button">⌾ Center on First Hearth</button><button class="bigAction" data-action="open-world-creator" type="button">🌍 Open World Creator</button><button class="bigAction danger" data-action="open-world-reset" type="button">↺ Reset Current World</button>`
 }
 function updatesHtml(){
-  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V7.2 · Painted World Pass</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
-  <div class="updateItem"><b>V7.2 — Painted World Pass</b><small>Current</small><p>This pass pushes the renderer further away from visible square placement with larger painterly land dabs, softer shore blending, stronger surf and more organic forest shapes.</p></div><div class="updateItem"><b>V7.1 — Brushed World Pass</b><small>Previous</small><p>Terrain leans harder into a brushed look with stronger painterly dabs, forests render more organically, and water has much more visible motion and shoreline surf.</p></div><div class="updateItem"><b>V7 — Premium Art Pass</b><small>Previous</small><p>The world now uses a richer painterly land overlay, softer coastal blending, more alive shore water, refined huts and farms, and upgraded tiny sprites so citizens and animals feel like miniature living beings in a premium-looking world.</p></div><div class="updateItem"><b>V6.6 — Organic Terrain + Sprite Overhaul</b><small>Previous</small><p>Coastlines became softer, shoreline water gained a light tide effect, wave motion became more visible, and both citizens and animals received upgraded tiny vector sprites.</p></div><div class="updateItem"><b>V6.5 — Grand Graphics Overhaul</b><small>Previous</small><p>The world surface was rebuilt with sharper texturing, richer biome color, animated wave motion, improved shoreline foam, bush-like food clusters, cleaner low-zoom forest rendering and stronger visual grounding between the land and the citizens.</p></div><div class="updateItem"><b>V6 — Living Civilization</b><small>Previous</small><p>Citizens age, learn, build skills, form households, create families, experience grief and leave a lineage behind.</p></div><div class="updateItem"><b>V5.4 — World Scale</b><small>Previous</small><p>Dynamic 100×100 through 500×500 world sizes.</p></div><div class="updateItem"><b>V5.3 — Family & Marriage</b><small>Previous</small><p>Dating, emotional bonds, marriage, shared surnames, breakups and child surname inheritance.</p></div><div class="updateItem"><b>V5.2 — Responsive World</b><small>Previous</small><p>Responsive landscape catalogs, smaller wording and procedural unique names.</p></div><div class="updateItem"><b>V5.1 — Living World</b><small>Previous</small><p>Compact HUD, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs and relationships.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
+  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V8 · Premium Painted World</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
+  <div class="updateItem"><b>V8 — Premium Painted World</b><small>Current</small><p>The surface renderer now samples a continuous height and moisture field instead of visually drawing terrain tile-by-tile. Coastlines, biome transitions and custom-painted land are smoothed; the ocean has traveling animated wave bands and tidal surf; forests use mixed, jittered tree species; and miniature citizens and wildlife received another detail pass.</p></div><div class="updateItem"><b>V7.2 — Painted World Pass</b><small>Previous</small><p>Added larger painterly land dabs, softer shore blending, stronger surf and more organic forest shapes.</p></div><div class="updateItem"><b>V7.1 — Brushed World Pass</b><small>Previous</small><p>Terrain leans harder into a brushed look with stronger painterly dabs, forests render more organically, and water has much more visible motion and shoreline surf.</p></div><div class="updateItem"><b>V7 — Premium Art Pass</b><small>Previous</small><p>The world now uses a richer painterly land overlay, softer coastal blending, more alive shore water, refined huts and farms, and upgraded tiny sprites so citizens and animals feel like miniature living beings in a premium-looking world.</p></div><div class="updateItem"><b>V6.6 — Organic Terrain + Sprite Overhaul</b><small>Previous</small><p>Coastlines became softer, shoreline water gained a light tide effect, wave motion became more visible, and both citizens and animals received upgraded tiny vector sprites.</p></div><div class="updateItem"><b>V6.5 — Grand Graphics Overhaul</b><small>Previous</small><p>The world surface was rebuilt with sharper texturing, richer biome color, animated wave motion, improved shoreline foam, bush-like food clusters, cleaner low-zoom forest rendering and stronger visual grounding between the land and the citizens.</p></div><div class="updateItem"><b>V6 — Living Civilization</b><small>Previous</small><p>Citizens age, learn, build skills, form households, create families, experience grief and leave a lineage behind.</p></div><div class="updateItem"><b>V5.4 — World Scale</b><small>Previous</small><p>Dynamic 100×100 through 500×500 world sizes.</p></div><div class="updateItem"><b>V5.3 — Family & Marriage</b><small>Previous</small><p>Dating, emotional bonds, marriage, shared surnames, breakups and child surname inheritance.</p></div><div class="updateItem"><b>V5.2 — Responsive World</b><small>Previous</small><p>Responsive landscape catalogs, smaller wording and procedural unique names.</p></div><div class="updateItem"><b>V5.1 — Living World</b><small>Previous</small><p>Compact HUD, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs and relationships.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
   <div class="updateItem"><b>V4.1 — Underground</b><small>Previous</small><p>Surface/Underground toggle, caves, deep stone, underground lakes, magma, iron/gold/coal/crystal veins, mine entrances, tunneling miners and layer-aware god powers.</p></div>
   <div class="updateItem"><b>V4 — World Control</b><small>Previous</small><p>World, God Powers and Resources tabs; full people/village/history/settings panels; biome painting; fire and lava; iron and gold; wildlife; direct people spawning; persistent visual settings.</p></div>
   <div class="updateItem"><b>V3 — Civilization</b><small>Previous</small><p>Families, jobs, farms, stockpiles, building construction, discoveries and village growth.</p></div>
