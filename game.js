@@ -21,6 +21,12 @@ const underground=new Uint8Array(N),uStone=new Uint8Array(N),uIron=new Uint8Arra
 const TEX=2,terrainCanvas=document.createElement("canvas");terrainCanvas.width=WORLD_W*TEX;terrainCanvas.height=WORLD_H*TEX;const tctx=terrainCanvas.getContext("2d");
 const undergroundCanvas=document.createElement("canvas");undergroundCanvas.width=WORLD_W*TEX;undergroundCanvas.height=WORLD_H*TEX;const uctx=undergroundCanvas.getContext("2d");
 const names=["Mara","Dren","Tala","Korin","Nia","Rook","Sela","Bram","Ira","Eren","Veya","Lio","Asha","Toren","Mira","Kael","Rin","Orin","Nora","Vale","Edda","Jori","Lena","Oren","Tavi","Sora","Dara","Milo"];
+const nameStart=["Ael","Ar","Ash","Bel","Bra","Cal","Cor","Da","Del","El","Eri","Fa","Fen","Gal","Hal","Ily","Jar","Ka","Kel","Kor","La","Len","Ma","Mer","Na","Ner","O","Or","Ra","Ren","Sa","Sel","Ta","Tor","Va","Vel","Wen","Yor","Zel"];
+const nameMiddle=["","a","e","i","o","u","an","en","in","or","ar","el","ir","al","on","eth","is","ra","ri","lo","va","na"];
+const nameEnd=["","a","an","ar","as","en","er","eth","ia","ian","in","ir","is","o","on","or","os","ra","ren","ric","rin","sa","ta","us","yn"];
+const familyStart=["Oak","River","Stone","Green","Ash","Moon","Dawn","Vale","Hill","Pine","Wolf","Fox","Red","Grey","Bright","Deep","North","South","High","Low","Wild","Mist","Sun","Star"];
+const familyEnd=["born","brook","crest","field","ford","grove","hall","hart","mere","ridge","root","run","stead","stone","vale","ward","wood","fall","reach","song"];
+const usedNames=new Set(),usedFirstNames=new Set();
 const techNames=["Shelter","Storage","Agriculture","Stoneworking","Mining","Village Planning","Granaries","Roads"];
 
 let people=[],buildings=[],events=[],particles=[],clouds=[],constructionQueue=[],critters=[];
@@ -252,7 +258,158 @@ function paint(cx,cy,r,type,record=true){
   }
 }
 
-function makePerson(name,x,y,sex,age,parents=[]){return{id:nextPersonId++,name,x,y,px:x,py:y,sex,age,parents:[...parents],health:100,hunger:rnd(6,16),thirst:rnd(6,14),energy:rnd(80,100),job:age<14?"Child":"Gatherer",goal:"Explore",mood:"Curious",partner:null,children:[],memory:[parents.length?"Born in the settlement":"Entered the Tiny World"],alive:true,dir:1,phase:rnd(0,6.28),skin:rndi(0,3),shirt:rndi(0,5),hair:rndi(0,4),carryType:null,carryAmount:0,lastBirthDay:-999,workTimer:0,layer:"surface",traits:{bravery:rnd(.25,.9),work:rnd(.25,.9),social:rnd(.25,.9),curiosity:rnd(.25,.9),kindness:rnd(.25,.9)},socialNeed:rnd(5,25),stress:rnd(0,6),longGoal:"Build a stable life",decisionReason:"Learning the world",lastDecision:0,relations:{}}}
+
+function proceduralFirstName(){
+  for(let tries=0;tries<100;tries++){
+    const raw=nameStart[rndi(0,nameStart.length-1)]+nameMiddle[rndi(0,nameMiddle.length-1)]+nameEnd[rndi(0,nameEnd.length-1)];
+    const n=raw.charAt(0).toUpperCase()+raw.slice(1).toLowerCase();
+    if(n.length>=3&&n.length<=10&&!usedFirstNames.has(n))return n
+  }
+  for(let tries=0;tries<100;tries++){
+    const n=names[rndi(0,names.length-1)]+String.fromCharCode(97+rndi(0,25));
+    if(!usedFirstNames.has(n))return n
+  }
+  return `Person${nextPersonId}`
+}
+function proceduralSurname(){
+  return familyStart[rndi(0,familyStart.length-1)]+familyEnd[rndi(0,familyEnd.length-1)]
+}
+function generateUniqueName(preferredFirst=null,surname=null){
+  for(let tries=0;tries<250;tries++){
+    let first=preferredFirst&&tries===0?preferredFirst:proceduralFirstName();
+    if(usedFirstNames.has(first)){preferredFirst=null;continue}
+    const last=surname||proceduralSurname();
+    const full=`${first} ${last}`;
+    if(!usedNames.has(full))return full
+  }
+  return `Citizen ${nextPersonId}`
+}
+function registerPersonName(full){
+  usedNames.add(full);
+  const first=String(full).split(" ")[0];
+  if(first)usedFirstNames.add(first)
+}
+function inheritedSurname(a,b){
+  const sa=a?.name?.split(" ").slice(-1)[0],sb=b?.name?.split(" ").slice(-1)[0];
+  return sa&&sb?(Math.random()<.5?sa:sb):(sa||sb||proceduralSurname())
+}
+
+function memoryAdd(p,text){
+  if(!p||!text)return;
+  p.memory=p.memory||[];
+  if(p.memory[0]!==text)p.memory.unshift(text);
+  p.memory=p.memory.slice(0,10)
+}
+function relationValue(p,id){return Number((p?.relations&&p.relations[id])||0)}
+function changeRelation(a,b,amount){
+  if(!a||!b||a.id===b.id)return;
+  a.relations=a.relations||{};b.relations=b.relations||{};
+  a.relations[b.id]=clamp(relationValue(a,b.id)+amount,-100,100);
+  b.relations[a.id]=clamp(relationValue(b,a.id)+amount,-100,100)
+}
+function surnameOf(p){return p?.name?.split(" ").slice(-1)[0]||proceduralSurname()}
+function firstNameOf(p){return p?.name?.split(" ")[0]||"Citizen"}
+function renamePersonSurname(p,newSurname,reason=""){
+  if(!p||!newSurname)return;
+  const old=p.name,first=firstNameOf(p),next=`${first} ${newSurname}`;
+  if(old===next)return;
+  usedNames.delete(old);
+  p.name=next;
+  usedNames.add(next);
+  p.nameHistory=p.nameHistory||[];
+  p.nameHistory.unshift(old);p.nameHistory=p.nameHistory.slice(0,8);
+  if(reason)memoryAdd(p,`${reason}: ${old} → ${next}`)
+}
+function chooseMarriageSurname(a,b){
+  const sa=surnameOf(a),sb=surnameOf(b);
+  if(sa===sb)return sa;
+  const aAttachment=(a.surnameAttachment||.5)+((a.traits?.kindness||.5)*-.08)+((a.traits?.work||.5)*.08);
+  const bAttachment=(b.surnameAttachment||.5)+((b.traits?.kindness||.5)*-.08)+((b.traits?.work||.5)*.08);
+  return Math.random()<aAttachment/(aAttachment+bAttachment)?sa:sb
+}
+function chooseUnmarriedChildSurname(a,b){
+  const sa=surnameOf(a),sb=surnameOf(b);
+  if(sa===sb)return{surname:sa,chooser:a};
+  const scoreA=(a.surnameAttachment||.5)*.65+(a.traits?.kindness||.5)*.12+clamp(relationValue(a,b.id),-100,100)/500+.25;
+  const scoreB=(b.surnameAttachment||.5)*.65+(b.traits?.kindness||.5)*.12+clamp(relationValue(b,a.id),-100,100)/500+.25;
+  const chooser=Math.random()<scoreA/(scoreA+scoreB)?a:b;
+  return{surname:surnameOf(chooser),chooser}
+}
+function inheritedSurname(a,b){
+  if(a?.relationshipStage==="married"&&b?.relationshipStage==="married"&&a.partner===b.id&&b.partner===a.id&&surnameOf(a)===surnameOf(b))return surnameOf(a);
+  return chooseUnmarriedChildSurname(a,b).surname
+}
+function compatibilityScore(a,b){
+  if(!a||!b)return 0;
+  const ta=a.traits||{},tb=b.traits||{};
+  const ageFit=clamp(1-Math.abs(a.age-b.age)/22,0,1);
+  const kindness=((ta.kindness||.5)+(tb.kindness||.5))/2;
+  const socialFit=1-Math.abs((ta.social||.5)-(tb.social||.5));
+  const workFit=1-Math.abs((ta.work||.5)-(tb.work||.5));
+  const curiosityFit=1-Math.abs((ta.curiosity||.5)-(tb.curiosity||.5));
+  return clamp(ageFit*.22+kindness*.24+socialFit*.20+workFit*.16+curiosityFit*.18,0,1)
+}
+function relationshipBond(a,b){return a&&b?(relationValue(a,b.id)+relationValue(b,a.id))/2:0}
+function isCloseKin(a,b){
+  if(!a||!b)return true;
+  if((a.parents||[]).includes(b.id)||(b.parents||[]).includes(a.id))return true;
+  if((a.children||[]).includes(b.id)||(b.children||[]).includes(a.id))return true;
+  const ap=a.parents||[],bp=b.parents||[];
+  return ap.some(id=>bp.includes(id))
+}
+function marryCouple(a,b){
+  if(!a||!b||a.partner!==b.id||b.partner!==a.id)return;
+  const oldA=a.name,oldB=b.name,familyName=chooseMarriageSurname(a,b);
+  renamePersonSurname(a,familyName,"Married name");
+  renamePersonSurname(b,familyName,"Married name");
+  a.relationshipStage=b.relationshipStage="married";
+  a.marriageDay=b.marriageDay=Math.floor(day);
+  a.familySurname=b.familySurname=familyName;
+  changeRelation(a,b,12);
+  a.stress=clamp((a.stress||0)-10,0,100);b.stress=clamp((b.stress||0)-10,0,100);
+  memoryAdd(a,`Married ${b.name} on day ${Math.floor(day)}`);
+  memoryAdd(b,`Married ${a.name} on day ${Math.floor(day)}`);
+  addEvent(`${oldA} and ${oldB} married and became the ${familyName} family.`,"marriage");
+  showToast(`${firstNameOf(a)} & ${firstNameOf(b)} married`)
+}
+function splitCouple(a,b,why="grew apart"){
+  if(!a||!b)return;
+  const wasMarried=a.relationshipStage==="married"||b.relationshipStage==="married";
+  a.partner=null;b.partner=null;
+  a.relationshipStage=b.relationshipStage="single";
+  a.relationshipSince=b.relationshipSince=0;
+  a.marriageDay=b.marriageDay=null;
+  a.familySurname=b.familySurname=null;
+  a.lastBreakupDay=b.lastBreakupDay=Math.floor(day);
+  a.breakups=(a.breakups||0)+1;b.breakups=(b.breakups||0)+1;
+  if(wasMarried){
+    if(a.birthSurname)renamePersonSurname(a,a.birthSurname,"Returned to birth name");
+    if(b.birthSurname)renamePersonSurname(b,b.birthSurname,"Returned to birth name")
+  }
+  memoryAdd(a,`${wasMarried?"Marriage":"Relationship"} with ${b.name} ended`);
+  memoryAdd(b,`${wasMarried?"Marriage":"Relationship"} with ${a.name} ended`);
+  addEvent(`${a.name} and ${b.name} ${wasMarried?"ended their marriage":"split up"} because they ${why}.`,"relationship")
+}
+
+function makePerson(name,x,y,sex,age,parents=[]){
+  const finalName=(!name||usedNames.has(name)||usedFirstNames.has(String(name).split(" ")[0]))?generateUniqueName(name?String(name).split(" ")[0]:null):name;
+  registerPersonName(finalName);
+  return{
+    id:nextPersonId++,name:finalName,x,y,px:x,py:y,sex,age,parents:[...parents],
+    health:100,hunger:rnd(6,16),thirst:rnd(6,14),energy:rnd(80,100),
+    job:age<14?"Child":"Gatherer",goal:"Explore",mood:"Curious",
+    partner:null,children:[],memory:[parents.length?"Born in the settlement":"Entered the Tiny World"],
+    alive:true,dir:1,phase:rnd(0,6.28),skin:rndi(0,3),shirt:rndi(0,5),hair:rndi(0,4),
+    carryType:null,carryAmount:0,lastBirthDay:-999,workTimer:0,layer:"surface",
+    traits:{bravery:rnd(.25,.9),work:rnd(.25,.9),social:rnd(.25,.9),curiosity:rnd(.25,.9),kindness:rnd(.25,.9)},
+    socialNeed:rnd(5,25),stress:rnd(0,6),longGoal:"Build a stable life",
+    decisionReason:"Learning the world",lastDecision:0,relations:{},
+    relationshipStage:"single",relationshipSince:0,marriageDay:null,
+    familySurname:null,birthSurname:String(finalName).split(" ").slice(-1)[0],
+    birthName:finalName,nameHistory:[],surnameAttachment:rnd(.25,.95),
+    breakups:0,lastBreakupDay:-999
+  }
+}
 function makeCritter(type,x,y){
   const c={id:nextCritterId++,type,x,y,px:x,py:y,dir:1,phase:rnd(0,6.28),alive:true};
   critters.push(c);return c
@@ -345,13 +502,16 @@ function aiUpdateMind(p){
 function aiSocialize(p){
   if(p.age<10||p.socialNeed<72||p.layer==="underground")return false;
   let friend=null,bd=8;
-  for(const q of people){if(!q.alive||q.id===p.id||q.layer==="underground")continue;const d=Math.hypot(q.x-p.x,q.y-p.y);if(d<bd){bd=d;friend=q}}
+  const romantic=p.partner?people.find(q=>q.id===p.partner&&q.alive&&q.layer!=="underground"):null;
+  if(romantic&&Math.hypot(romantic.x-p.x,romantic.y-p.y)<10){friend=romantic;bd=Math.hypot(romantic.x-p.x,romantic.y-p.y)}
+  else for(const q of people){if(!q.alive||q.id===p.id||q.layer==="underground")continue;const d=Math.hypot(q.x-p.x,q.y-p.y);if(d<bd){bd=d;friend=q}}
   if(!friend)return false;
   p.goal=`Talk with ${friend.name}`;
   if(bd>1.6){moveToward(p,friend);return true}
   p.socialNeed=clamp(p.socialNeed-32,0,100);friend.socialNeed=clamp((friend.socialNeed||0)-18,0,100);
-  p.relations[friend.id]=clamp(Number(p.relations[friend.id]||0)+1,-100,100);
-  friend.relations=friend.relations||{};friend.relations[p.id]=clamp(Number(friend.relations[p.id]||0)+1,-100,100);
+  const socialGain=p.partner===friend.id?(p.relationshipStage==="married"?1.7:1.4):1;
+  p.relations[friend.id]=clamp(Number(p.relations[friend.id]||0)+socialGain,-100,100);
+  friend.relations=friend.relations||{};friend.relations[p.id]=clamp(Number(friend.relations[p.id]||0)+socialGain,-100,100);
   p.mood="Connected";
   if(Math.random()<.02){p.memory.unshift(`Shared time with ${friend.name}`);p.memory=p.memory.slice(0,8)}
   return true
@@ -404,8 +564,114 @@ function workPerson(p){if(p.job==="Miner"&&buildingsOf("mine").length)return wor
   wander(p);return true;
 }
 function homeCapacity(){return buildingsOf("hut").length*4+2}
-function matchPartners(){const singles=people.filter(p=>p.alive&&p.age>=18&&!p.partner);for(const p of singles){if(p.partner)continue;const q=singles.find(o=>o!==p&&!o.partner&&o.sex!==p.sex&&Math.abs(o.age-p.age)<18);if(q){p.partner=q.id;q.partner=p.id;p.memory.unshift(`Became partners with ${q.name}`);q.memory.unshift(`Became partners with ${p.name}`);addEvent(`${p.name} and ${q.name} formed a family.`,"family")}}}
-function tryBirths(){if(people.filter(p=>p.alive).length>=48)return;if(homeCapacity()<=people.filter(p=>p.alive).length)return;if(settlement.food<12)return;for(const mother of people){if(!mother.alive||mother.sex!=="F"||mother.age<18||mother.age>42||!mother.partner||day-mother.lastBirthDay<22)continue;const father=people.find(p=>p.id===mother.partner&&p.alive);if(!father)continue;if(Math.random()>.008)continue;const sex=Math.random()<.5?"F":"M",name=names[(nextPersonId+rndi(0,names.length-1))%names.length]+(nextPersonId>names.length?` ${Math.ceil(nextPersonId/names.length)}`:"");const baby=makePerson(name,mother.x,mother.y,sex,0,[mother.id,father.id]);mother.children.push(baby.id);father.children.push(baby.id);mother.lastBirthDay=day;settlement.food=Math.max(0,settlement.food-6);people.push(baby);settlement.births++;mother.memory.unshift(`Gave birth to ${name}`);father.memory.unshift(`Became parent of ${name}`);addEvent(`${name} was born to ${mother.name} and ${father.name}.`,"family");showToast(`${name} was born`);break}}
+function matchPartners(){
+  const singles=people.filter(p=>p.alive&&p.age>=18&&!p.partner&&p.layer!=="underground"&&day-(p.lastBreakupDay||-999)>7);
+  for(const p of singles){
+    if(p.partner)continue;
+    let best=null,bestScore=.55;
+    for(const q of singles){
+      if(q===p||q.partner||q.sex===p.sex||Math.abs(q.age-p.age)>18||isCloseKin(p,q))continue;
+      const dist=Math.hypot(q.x-p.x,q.y-p.y);
+      if(dist>22)continue;
+      const score=compatibilityScore(p,q)+relationValue(p,q.id)/220+relationValue(q,p.id)/220-dist/170;
+      if(score>bestScore){bestScore=score;best=q}
+    }
+    if(best&&Math.random()<.16){
+      p.partner=best.id;best.partner=p.id;
+      p.relationshipStage=best.relationshipStage="dating";
+      p.relationshipSince=best.relationshipSince=Math.floor(day);
+      const initial=Math.round(16+compatibilityScore(p,best)*24);
+      p.relations[best.id]=Math.max(relationValue(p,best.id),initial);
+      best.relations[p.id]=Math.max(relationValue(best,p.id),initial);
+      memoryAdd(p,`Started dating ${best.name}`);
+      memoryAdd(best,`Started dating ${p.name}`);
+      addEvent(`${p.name} and ${best.name} began dating.`,"relationship")
+    }
+  }
+}
+function updateRelationships(){
+  const done=new Set();
+  for(const p of people){
+    if(!p.alive||!p.partner||done.has(p.id))continue;
+    const q=people.find(x=>x.id===p.partner);
+    if(!q||!q.alive){
+      p.partner=null;p.relationshipStage="single";p.familySurname=null;p.marriageDay=null;
+      memoryAdd(p,"Lost their partner");
+      continue
+    }
+    if(q.partner!==p.id){p.partner=null;p.relationshipStage="single";continue}
+    done.add(p.id);done.add(q.id);
+
+    const comp=compatibilityScore(p,q),dist=Math.hypot(p.x-q.x,p.y-q.y);
+    let emotional=(comp-.56)*1.5;
+    if(dist<4)emotional+=.20;
+    if(dist>18)emotional-=.10;
+    if((p.stress||0)>68)emotional-=.20;
+    if((q.stress||0)>68)emotional-=.20;
+    if(p.hunger>82||p.thirst>82)emotional-=.08;
+    if(q.hunger>82||q.thirst>82)emotional-=.08;
+    if(p.mood==="Connected"||q.mood==="Connected")emotional+=.10;
+
+    // Occasional emotional moments create real relationship variation.
+    if(Math.random()<.035){
+      const kindness=((p.traits?.kindness||.5)+(q.traits?.kindness||.5))/2;
+      if((p.stress||0)+(q.stress||0)>125&&kindness<.58)emotional-=rnd(2,5);
+      else emotional+=rnd(1,3)
+    }
+    changeRelation(p,q,emotional);
+
+    const bond=relationshipBond(p,q);
+    const together=day-Math.min(p.relationshipSince||day,q.relationshipSince||day);
+
+    if(p.relationshipStage==="dating"){
+      if(together>8&&bond>48&&comp>.54&&Math.random()<.020){marryCouple(p,q);continue}
+      if(together>4&&bond<2&&Math.random()<.055){splitCouple(p,q,"stopped feeling close");continue}
+      if(together>10&&bond<18&&((p.stress||0)>78||(q.stress||0)>78)&&Math.random()<.025){splitCouple(p,q,"could not handle the strain");continue}
+    }else if(p.relationshipStage==="married"){
+      if(together>15&&bond<-26&&Math.random()<.018){splitCouple(p,q,"grew deeply unhappy");continue}
+      if(bond>62&&dist<5&&Math.random()<.01){
+        p.stress=clamp((p.stress||0)-2,0,100);
+        q.stress=clamp((q.stress||0)-2,0,100)
+      }
+    }
+  }
+}
+function tryBirths(){
+  if(people.filter(p=>p.alive).length>=48)return;
+  if(homeCapacity()<=people.filter(p=>p.alive).length)return;
+  if(settlement.food<12)return;
+  for(const mother of people){
+    if(!mother.alive||mother.sex!=="F"||mother.age<18||mother.age>42||!mother.partner||day-mother.lastBirthDay<22)continue;
+    const father=people.find(p=>p.id===mother.partner&&p.alive);
+    if(!father||father.partner!==mother.id)continue;
+
+    const bond=relationshipBond(mother,father);
+    const baseChance=mother.relationshipStage==="married"?.011:.0065;
+    const birthChance=baseChance*clamp((bond+100)/150,.30,1.35);
+    if(Math.random()>birthChance)continue;
+
+    let childSurname,chosenBy=null;
+    if(mother.relationshipStage==="married"&&father.relationshipStage==="married"&&surnameOf(mother)===surnameOf(father)){
+      childSurname=surnameOf(mother)
+    }else{
+      const choice=chooseUnmarriedChildSurname(mother,father);
+      childSurname=choice.surname;chosenBy=choice.chooser
+    }
+
+    const sex=Math.random()<.5?"F":"M",name=generateUniqueName(null,childSurname);
+    const baby=makePerson(name,mother.x,mother.y,sex,0,[mother.id,father.id]);
+    mother.children.push(baby.id);father.children.push(baby.id);
+    mother.lastBirthDay=day;
+    settlement.food=Math.max(0,settlement.food-6);
+    people.push(baby);settlement.births++;
+    memoryAdd(mother,`Gave birth to ${name}`);
+    memoryAdd(father,`Became parent of ${name}`);
+    if(chosenBy)memoryAdd(chosenBy,`Chose the ${childSurname} surname for ${firstNameOf(baby)}`);
+    addEvent(`${name} was born to ${mother.name} and ${father.name}${chosenBy?`; ${chosenBy.name} chose the ${childSurname} family name`:""}.`,"family");
+    showToast(`${name} was born`);
+    break
+  }
+}
 function eatFromStores(p){if(p.hunger<58)return false;if(settlement.food>0){settlement.food--;p.hunger=clamp(p.hunger-36,0,100);p.goal="Eat";return true}return false}
 function think(p){if(!p.alive)return;p.px+=(p.x-p.px)*.23;p.py+=(p.y-p.py)*.23;p.phase+=.22;p.hunger+=p.age<6?.020:.030;p.thirst+=.043;p.energy-=p.age<6?.010:.016;p.age+=.00011;aiUpdateMind(p);
   const pi=idx(clamp(Math.round(p.x),0,WORLD_W-1),clamp(Math.round(p.y),0,WORLD_H-1));if(p.layer!=="underground"){if(terrain[pi]===T.LAVA)p.health-=1.6;else if(burn[pi]>110)p.health-=.30}else if(underground[pi]===U.MAGMA)p.health-=1.8;if(p.hunger>92||p.thirst>94)p.health-=.09;else if(p.health<100&&p.hunger<55&&p.thirst<55)p.health+=.014;if(p.health<=0){p.alive=false;settlement.deaths++;addEvent(`${p.name} died at age ${Math.floor(p.age)}.`,"citizen");return}
@@ -435,7 +701,7 @@ function planVillage(){const pop=people.filter(p=>p.alive).length,huts=buildings
 }
 function updateFarms(){for(const f of buildingsOf("farm")){const i=idx(clamp(Math.round(f.x),0,WORLD_W-1),clamp(Math.round(f.y),0,WORLD_H-1));const rain=wet[i]>0?1.7:1;f.crop=clamp(f.crop+.045*rain,0,100)}}
 function consumeSettlement(){const alive=people.filter(p=>p.alive).length;if(tick%420===0&&alive>0)settlement.food=Math.max(0,settlement.food-Math.max(1,Math.floor(alive/4)))}
-function simulate(){if(paused)return;const loops=speed===1?1:speed===2?2:5;for(let l=0;l<loops;l++){tick++;day+=.008;people.forEach(think);updateCritters();buildings.forEach(b=>b.age++);updateFarms();consumeSettlement();if(tick%120===0)assignJobs();if(tick%190===0){planVillage();matchPartners();tryBirths()}if(tick%280===0){for(let n=0;n<280;n++){const x=rndi(0,WORLD_W-1),y=rndi(0,WORLD_H-1),i=idx(x,y);if(terrain[i]===T.GRASS&&food[i]<4&&Math.random()<.15)food[i]++;if(terrain[i]===T.FOREST&&trees[i]<4&&Math.random()<.18)trees[i]++;if(wet[i])wet[i]--;if(scar[i])scar[i]--;if(burn[i])burn[i]=Math.max(0,burn[i]-2)}dirty=true}}
+function simulate(){if(paused)return;const loops=speed===1?1:speed===2?2:5;for(let l=0;l<loops;l++){tick++;day+=.008;people.forEach(think);updateCritters();buildings.forEach(b=>b.age++);updateFarms();consumeSettlement();if(tick%95===0)updateRelationships();if(tick%120===0)assignJobs();if(tick%190===0){planVillage();matchPartners();tryBirths()}if(tick%280===0){for(let n=0;n<280;n++){const x=rndi(0,WORLD_W-1),y=rndi(0,WORLD_H-1),i=idx(x,y);if(terrain[i]===T.GRASS&&food[i]<4&&Math.random()<.15)food[i]++;if(terrain[i]===T.FOREST&&trees[i]<4&&Math.random()<.18)trees[i]++;if(wet[i])wet[i]--;if(scar[i])scar[i]--;if(burn[i])burn[i]=Math.max(0,burn[i]-2)}dirty=true}}
   particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.life--;p.vy+=p.type==="leaf"?.006:0});particles=particles.filter(p=>p.life>0);clouds.forEach(c=>{c.life--;c.phase+=.015;c.x+=.015});clouds=clouds.filter(c=>c.life>0);updateUI()}
 
 function generate(useExistingSeed=false){
@@ -484,15 +750,21 @@ function generate(useExistingSeed=false){
   paint(sx,sy,25,"land",false);
 
   nextPersonId=1;nextBuildingId=1;nextCritterId=1;
+  usedNames.clear();usedFirstNames.clear();
   people=[];
 
   const startPop=configValue("startPopulation");
   for(let n=0;n<startPop;n++){
     const sex=n%2===0?"F":"M";
-    const name=n===0?"Mara":n===1?"Dren":`${names[(n+2)%names.length]} ${n+1}`;
+    const name=generateUniqueName(n===0?"Mara":n===1?"Dren":null);
     people.push(makePerson(name,sx+rndi(-3,3),sy+rndi(-2,2),sex,rndi(19,30)))
   }
-  if(people.length>=2){people[0].partner=people[1].id;people[1].partner=people[0].id}
+  if(people.length>=2){
+    people[0].partner=people[1].id;people[1].partner=people[0].id;
+    people[0].relationshipStage=people[1].relationshipStage="dating";
+    people[0].relationshipSince=people[1].relationshipSince=1;
+    people[0].relations[people[1].id]=36;people[1].relations[people[0].id]=36
+  }
 
   buildings=[];events=[];particles=[];clouds=[];critters=[];
   day=1;tick=0;camX=sx;camY=sy;zoom=4;dirty=true;undergroundDirty=true;selected=null;
@@ -691,7 +963,21 @@ function render(){
 function eraName(){const pop=people.filter(p=>p.alive).length;if(pop>=18)return"Village";if(pop>=10)return"Hamlet";if(pop>=5)return"Growing Camp";if(buildingsOf("hut").length)return"Early Settlement";return"Primitive"}
 function jobCounts(){const c={};for(const p of people.filter(p=>p.alive)){c[p.job]=(c[p.job]||0)+1}return c}
 function renderCivilization(){if(!settlement)return;const counts=jobCounts(),complete=buildings.filter(b=>b.complete),pending=buildings.filter(b=>!b.complete);settlementNameEl.textContent=settlement.name;settlementEraEl.textContent=`${eraName()} · Day ${Math.floor(day)}`;civBody.innerHTML=`<div class="sectionTitle">Stockpile</div><div class="resourceGrid"><div class="resourceCard">🍎 Food<b>${Math.floor(settlement.food)}</b></div><div class="resourceCard">🪵 Wood<b>${Math.floor(settlement.wood)}</b></div><div class="resourceCard">🪨 Stone<b>${Math.floor(settlement.stone)}</b></div><div class="resourceCard">⛓ Iron<b>${Math.floor(settlement.iron||0)}</b></div><div class="resourceCard">🟡 Gold<b>${Math.floor(settlement.gold||0)}</b></div><div class="resourceCard">⬛ Coal<b>${Math.floor(settlement.coal||0)}</b></div></div><div class="sectionTitle">Settlement</div><div class="civRows"><div class="civRow"><span>Population</span><span>${people.filter(p=>p.alive).length} / ${homeCapacity()}</span></div><div class="civRow"><span>Buildings</span><span>${complete.length}${pending.length?` + ${pending.length} building`:''}</span></div><div class="civRow"><span>Births / deaths</span><span>${settlement.births} / ${settlement.deaths}</span></div></div><div class="sectionTitle">Jobs</div><div class="civRows">${Object.entries(counts).map(([k,v])=>`<div class="civRow"><span>${escapeHtml(k)}</span><span>${v}</span></div>`).join('')}</div><div class="sectionTitle">Discoveries</div><div class="techList">${techNames.map(t=>`<span class="tech ${hasTech(t)?'':'locked'}">${hasTech(t)?'✓ ':''}${t}</span>`).join('')}</div><div class="sectionTitle">Buildings</div><div class="civRows">${["firepit","hut","stockpile","farm","mine","granary","workshop"].map(t=>`<div class="civRow"><span>${t[0].toUpperCase()+t.slice(1)}</span><span>${buildingsOf(t).length}</span></div>`).join('')}</div>`}
-function showCitizen(p){selected=p.id;citizenName.textContent=p.name;citizenSub.textContent=`${Math.floor(p.age)} · ${p.sex==="F"?"Female":"Male"} · ${p.layer==="underground"?"Underground":"Surface"}`;const partner=p.partner?people.find(q=>q.id===p.partner):null,parents=p.parents.map(id=>people.find(q=>q.id===id)).filter(Boolean);citizenBody.innerHTML=`<div class="stats"><div class="stat">❤️ Health<b>${Math.round(p.health)}%</b></div><div class="stat">⚡ Energy<b>${Math.round(p.energy)}%</b></div><div class="stat">🍖 Hunger<b>${Math.round(p.hunger)}%</b></div><div class="stat">💧 Thirst<b>${Math.round(p.thirst)}%</b></div></div><div class="citizenRow"><span class="jobBadge">🛠 ${escapeHtml(p.job)}</span> <span class="jobBadge">🧠 ${escapeHtml(aiTraitLabel(p))}</span><br><b>Current goal:</b> ${escapeHtml(p.goal)}<br><b>Long goal:</b> ${escapeHtml(p.longGoal||"Build a stable life")}<br><b>Mood:</b> ${escapeHtml(p.mood)}<br><b>Decision:</b> ${escapeHtml(p.decisionReason||"Observing the world")}</div>${p.carryAmount?`<div class="carry">Carrying ${p.carryAmount} ${p.carryType}</div>`:''}<div class="family"><b>Partner:</b> ${partner?escapeHtml(partner.name):'None'}<br><b>Parents:</b> ${parents.length?parents.map(x=>escapeHtml(x.name)).join(', '):'—'}<br><b>Children:</b> ${p.children.length}</div><div class="memory">Latest memory: ${escapeHtml(p.memory[0]||"None")}</div>`;citizen.classList.remove("hidden")}
+function showCitizen(p){
+  selected=p.id;
+  citizenName.textContent=p.name;
+  citizenSub.textContent=`${Math.floor(p.age)} · ${p.sex==="F"?"Female":"Male"} · ${p.layer==="underground"?"Underground":"Surface"}`;
+  const partner=p.partner?people.find(q=>q.id===p.partner):null;
+  const parents=p.parents.map(id=>people.find(q=>q.id===id)).filter(Boolean);
+  const bond=partner?Math.round(relationshipBond(p,partner)):0;
+  const relationLabel=p.relationshipStage==="married"?"💍 Married":p.relationshipStage==="dating"?"❤️ Dating":"Single";
+  citizenBody.innerHTML=`<div class="stats"><div class="stat">❤️ Health<b>${Math.round(p.health)}%</b></div><div class="stat">⚡ Energy<b>${Math.round(p.energy)}%</b></div><div class="stat">🍖 Hunger<b>${Math.round(p.hunger)}%</b></div><div class="stat">💧 Thirst<b>${Math.round(p.thirst)}%</b></div></div>
+  <div class="citizenRow"><span class="jobBadge">🛠 ${escapeHtml(p.job)}</span> <span class="jobBadge">🧠 ${escapeHtml(aiTraitLabel(p))}</span><br><b>Current goal:</b> ${escapeHtml(p.goal)}<br><b>Long goal:</b> ${escapeHtml(p.longGoal||"Build a stable life")}<br><b>Mood:</b> ${escapeHtml(p.mood)}<br><b>Decision:</b> ${escapeHtml(p.decisionReason||"Observing the world")}</div>
+  ${p.carryAmount?`<div class="carry">Carrying ${p.carryAmount} ${p.carryType}</div>`:""}
+  <div class="family"><b>Status:</b> ${relationLabel}<br><b>Partner:</b> ${partner?escapeHtml(partner.name):"None"}${partner?`<br><b>Relationship bond:</b> ${bond}/100`:""}${p.relationshipStage==="married"?`<br><b>Family surname:</b> ${escapeHtml(surnameOf(p))}<br><b>Married:</b> Day ${p.marriageDay}`:""}<br><b>Birth name:</b> ${escapeHtml(p.birthName||p.name)}<br><b>Parents:</b> ${parents.length?parents.map(x=>escapeHtml(x.name)).join(", "):"—"}<br><b>Children:</b> ${p.children.length}</div>
+  <div class="memory">Latest memory: ${escapeHtml(p.memory[0]||"None")}</div>`;
+  citizen.classList.remove("hidden")
+}
 const toolMeta={
   inspect:["👁","Inspect","Tap a person"],land:["🌱","Raise Land","Drag to terraform"],water:["🌊","Water","Drag to carve water"],grass:["🌿","Grassland","Paint a biome"],forest:["🌲","Forest","Paint a biome"],sand:["🏜️","Desert","Paint a biome"],snow:["❄️","Snow","Paint a biome"],mountain:["⛰️","Mountain","Raise mountains"],
   rain:["🌧","Rain","Bless the land"],drought:["☀️","Drought","Dry the land"],fire:["🔥","Fire","Burn an area"],lava:["🌋","Lava","Create molten ground"],lightning:["⚡","Lightning","Strike the world"],heal:["💚","Heal","Heal living people"],bless:["✨","Bless","Restore people nearby"],
@@ -703,7 +989,7 @@ function refreshToolChip(){const m=toolMeta[tool]||["✦",tool,"Use on world"];t
 function updateUI(){if(!settlement)return;popEl.textContent=people.filter(p=>p.alive).length;dayEl.textContent=Math.floor(day);eraEl.textContent=eraName();pauseBtn.textContent=paused?"▶":"⏸";speedBtn.textContent="×"+speed;layerIcon.textContent=activeLayer==="surface"?"🌿":"⛏️";layerLabel.textContent=activeLayer==="surface"?"Surface":"Underground";layerBtn.classList.toggle("underground",activeLayer==="underground");layerBtn.classList.toggle("surface",activeLayer==="surface");if(miniMapMode)miniMapMode.textContent=activeLayer==="surface"?"Surface":"Underground";const m=toolMeta[tool]||["✦",tool,""];status.textContent=tool==="inspect"?`${layerName()} · inspect · drag · pinch to zoom`:`${layerName()} · ${m[1]} · ${["deer","sheep","wolf","human","couple","family"].includes(tool)?"tap to place":`brush ${brush} · drag to paint`}`;refreshToolChip();if(selected){const p=people.find(q=>q.id===selected);if(p&&!citizen.classList.contains("hidden"))showCitizen(p)}}
 function spawnHumanAt(wx,wy,age=20){
   if(!passable(wx,wy)){showToast("Choose dry land");return null}
-  const sex=Math.random()<.5?"F":"M",base=names[rndi(0,names.length-1)],name=`${base} ${nextPersonId}`;
+  const sex=Math.random()<.5?"F":"M",name=generateUniqueName();
   const p=makePerson(name,wx,wy,sex,age);people.push(p);addEvent(`${name} was placed into the world by the Creator.`,"divine");return p
 }
 function applyTool(wx,wy,continuous=false){
@@ -716,8 +1002,16 @@ function applyTool(wx,wy,continuous=false){
   if(tool==="inspect"){if(continuous)return;const p=people.filter(q=>q.alive).sort((a,b)=>Math.hypot(a.x-wx,a.y-wy)-Math.hypot(b.x-wx,b.y-wy))[0];if(p&&Math.hypot(p.x-wx,p.y-wy)<5)showCitizen(p);return}
   if(["deer","sheep","wolf"].includes(tool)){if(continuous)return;spawnCritter(tool,wx,wy,1);return}
   if(tool==="human"){if(continuous)return;spawnHumanAt(wx,wy,20);assignJobs();return}
-  if(tool==="couple"){if(continuous)return;const a=spawnHumanAt(wx-1,wy,22),b=spawnHumanAt(wx+1,wy,24);if(a&&b){a.sex="F";b.sex="M";a.partner=b.id;b.partner=a.id;addEvent(`${a.name} and ${b.name} entered the world as a couple.`,"divine")}assignJobs();return}
-  if(tool==="family"){if(continuous)return;const a=spawnHumanAt(wx-1,wy,27),b=spawnHumanAt(wx+1,wy,29);if(a&&b){a.sex="F";b.sex="M";a.partner=b.id;b.partner=a.id;const child=spawnHumanAt(wx,wy+1,6);if(child){child.parents=[a.id,b.id];child.job="Child";a.children.push(child.id);b.children.push(child.id)}addEvent(`A family was placed into Tiny World.`,"divine")}assignJobs();return}
+  if(tool==="couple"){if(continuous)return;const a=spawnHumanAt(wx-1,wy,22),b=spawnHumanAt(wx+1,wy,24);if(a&&b){a.sex="F";b.sex="M";a.partner=b.id;b.partner=a.id;a.relationshipStage=b.relationshipStage="dating";a.relationshipSince=b.relationshipSince=Math.floor(day);a.relations[b.id]=38;b.relations[a.id]=38;addEvent(`${a.name} and ${b.name} entered the world as a dating couple.`,"divine")}assignJobs();return}
+  if(tool==="family"){if(continuous)return;const a=spawnHumanAt(wx-1,wy,27),b=spawnHumanAt(wx+1,wy,29);if(a&&b){
+    a.sex="F";b.sex="M";a.partner=b.id;b.partner=a.id;
+    a.relationshipStage=b.relationshipStage="dating";a.relationshipSince=b.relationshipSince=Math.floor(day);
+    a.relations[b.id]=66;b.relations[a.id]=66;marryCouple(a,b);
+    const familyName=surnameOf(a),childName=generateUniqueName(null,familyName);
+    const child=makePerson(childName,wx,wy+1,Math.random()<.5?"F":"M",6,[a.id,b.id]);
+    people.push(child);child.job="Child";a.children.push(child.id);b.children.push(child.id);
+    addEvent(`The ${familyName} family was placed into Tiny World.`,"divine")
+  }assignJobs();return}
   if(tool==="heal"||tool==="bless"){
     const targets=people.filter(q=>q.alive&&Math.hypot(q.x-wx,q.y-wy)<brush);for(const p of targets){p.health=100;p.hunger=clamp(p.hunger-(tool==="bless"?45:20),0,100);p.thirst=clamp(p.thirst-(tool==="bless"?45:20),0,100);if(tool==="bless")p.energy=100;p.memory.unshift(tool==="bless"?"Received a divine blessing":"Touched by divine healing");spawnParticles("heal",p.x,p.y,8)}
     if(!continuous&&targets.length)addEvent(`${targets.length} ${targets.length===1?"person was":"people were"} ${tool==="bless"?"blessed":"healed"}.`,"divine");return
@@ -780,7 +1074,7 @@ function worldOverviewHtml(){
 function peopleHtml(){
   const alive=people.filter(p=>p.alive);
   if(!alive.length)return `<div class="emptyState">There are no living people in this world.</div>`;
-  return `<div class="menuHero"><div class="eyebrow">Population</div><h3>${alive.length} living people</h3><p>Tap a person to open their full citizen card.</p></div>${alive.slice().sort((a,b)=>a.age-b.age).map(p=>`<button class="listCard" data-person="${p.id}" type="button"><div class="avatar">${p.sex==="F"?"👩":"👨"}</div><div class="grow"><b>${escapeHtml(p.name)}</b><small>${escapeHtml(aiTraitLabel(p))} · age ${Math.floor(p.age)} · ${escapeHtml(p.job)} · ${escapeHtml(p.goal)}</small></div><div class="rightText">❤️ ${Math.round(p.health)}<br>${p.children.length} child${p.children.length===1?"":"ren"}</div></button>`).join("")}`
+  return `<div class="menuHero"><div class="eyebrow">Population</div><h3>${alive.length} living people</h3><p>Tap a person to open their full citizen card.</p></div>${alive.slice().sort((a,b)=>a.age-b.age).map(p=>`<button class="listCard" data-person="${p.id}" type="button"><div class="avatar">${p.sex==="F"?"👩":"👨"}</div><div class="grow"><b>${escapeHtml(p.name)}</b><small>${p.relationshipStage==="married"?"💍 Married · ":p.relationshipStage==="dating"?"❤️ Dating · ":""}${escapeHtml(aiTraitLabel(p))} · age ${Math.floor(p.age)} · ${escapeHtml(p.job)}</small></div><div class="rightText">❤️ ${Math.round(p.health)}<br>${p.children.length} child${p.children.length===1?"":"ren"}</div></button>`).join("")}`
 }
 function villageHtml(){
   const counts=jobCounts(),complete=buildings.filter(b=>b.complete),pending=buildings.filter(b=>!b.complete);
@@ -805,8 +1099,8 @@ function settingsHtml(){
   <div class="menuSection">World management</div><button class="bigAction" data-action="center-world" type="button">⌾ Center on First Hearth</button><button class="bigAction" data-action="open-world-creator" type="button">🌍 Open World Creator</button><button class="bigAction danger" data-action="open-world-reset" type="button">↺ Reset Current World</button>`
 }
 function updatesHtml(){
-  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V5.1 · Living World</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
-  <div class="updateItem"><b>V5.1 — Living World</b><small>Current</small><p>Compact HUD and menus, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs, relationships and smarter citizen decision reasoning.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
+  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V5.3 · Family & Marriage</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
+  <div class="updateItem"><b>V5.3 — Family & Marriage</b><small>Current</small><p>Dating couples now build or lose emotional bonds, can marry or split, married partners adopt one shared surname, and children inherit the married family name or an unmarried parent-selected surname.</p></div><div class="updateItem"><b>V5.2 — Responsive World</b><small>Previous</small><p>Responsive landscape catalogs, smaller wording and procedural unique names.</p></div><div class="updateItem"><b>V5.1 — Living World</b><small>Previous</small><p>Compact HUD, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs and relationships.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
   <div class="updateItem"><b>V4.1 — Underground</b><small>Previous</small><p>Surface/Underground toggle, caves, deep stone, underground lakes, magma, iron/gold/coal/crystal veins, mine entrances, tunneling miners and layer-aware god powers.</p></div>
   <div class="updateItem"><b>V4 — World Control</b><small>Previous</small><p>World, God Powers and Resources tabs; full people/village/history/settings panels; biome painting; fire and lava; iron and gold; wildlife; direct people spawning; persistent visual settings.</p></div>
   <div class="updateItem"><b>V3 — Civilization</b><small>Previous</small><p>Families, jobs, farms, stockpiles, building construction, discoveries and village growth.</p></div>

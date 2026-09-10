@@ -1,32 +1,43 @@
-Tiny World V5.1 — LIVING WORLD
+Tiny World V5.3 — FAMILY & MARRIAGE
 
-COMPACT UI OVERHAUL
-- Top population/day/era information merged into one compact HUD.
-- Simulation controls merged into one small control cluster.
-- Atlas is collapsed by default into a tiny button.
-- Tap Atlas to expand it; tap again to collapse.
-- Bottom navigation reduced substantially.
-- Active tool bar is smaller.
-- Standalone status bar removed from visible UI.
-- World / God Powers / Resources sheets reduced from roughly 76% to about 56% of screen height.
-- Action grids use four columns on most iPhones.
-- Citizen inspector is smaller.
-- New ◫ button hides nearly all game UI for a clean world view. Tap it again to restore.
+RELATIONSHIP LIFE CYCLE
+- Compatible adults can begin dating instead of instantly becoming a permanent family.
+- Dating bonds change with compatibility, closeness, stress, hunger, thirst and social interaction.
+- Dating couples can marry when their relationship becomes strong.
+- Couples can split when emotional bonds deteriorate.
+- Unhappy marriages can eventually end too.
+- Close relatives (parents, children, siblings) cannot be romantically matched.
 
-AI FOUNDATION
-- Citizens now have persistent personality traits.
-- Traits include bravery, work ethic, social tendency, curiosity and kindness.
-- Citizens choose a basic long-term life goal based on personality.
-- Citizens track stress and social needs.
-- Citizens notice fire, lava, magma and nearby wolves as danger.
-- Citizens can abandon normal work to flee danger.
-- Social citizens seek nearby people and build relationships.
-- Job assignment is now partially influenced by personality instead of pure random fallback.
-- Citizen inspector shows personality, current goal, long-term goal and decision reason.
-- People list shows personality.
+MARRIAGE SURNAMES
+- Marriage selects one spouse's existing family surname.
+- BOTH spouses adopt the same surname.
+- Example:
+  Toren Riverward + Selian Mooncrest
+  could become Toren Riverward + Selian Riverward
+  OR Toren Mooncrest + Selian Mooncrest.
+- Birth names remain stored in the citizen inspector.
+- After a divorce, adults return to their birth surnames.
+- Existing children keep the surname they were born with.
 
-ALL V5 / V4 SYSTEMS REMAIN.
+CHILD NAMING
+- Every child still receives a unique procedural first name.
+- Married parents with one shared surname automatically give the child that family surname.
+- Unmarried parents choose between their two current surnames.
+- The parent who wins the naming decision is influenced by emotional bond, personality and attachment to their family name.
+- The choosing parent remembers the decision.
+- World History records the surname choice.
+
+INSPECTOR
+- Single / Dating / Married status.
+- Current partner.
+- Emotional relationship bond.
+- Marriage day.
+- Shared family surname.
+- Birth name.
+- Children and parents.
+
+All V5.2 responsive UI, V5.1 AI, V5 visuals, underground simulation, World Creator and God Powers remain.
 
 DEPLOY
-Replace the GitHub repo files with this flat build and commit.
-Cloudflare will automatically redeploy.
+Replace your GitHub repo files with this flat build and commit.
+Cloudflare should redeploy automatically.

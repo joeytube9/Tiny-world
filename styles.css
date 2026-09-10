@@ -636,3 +636,149 @@ button.active{
   .hudera{display:none}
   .actionGrid{grid-template-columns:repeat(3,1fr)}
 }
+
+
+/* ================================================================
+   V5.2 — RESPONSIVE CATALOG + SMALLER WORDING
+   ================================================================ */
+.navtab b{font-size:8px}
+.toolchip>div b{font-size:10px}
+.toolchip>div small{font-size:7px}
+.sheetHead>div>b{font-size:16px}
+.sheetHead .muted{font-size:8px}
+.segment{font-size:8px;padding:0 8px}
+.menuSection{font-size:7px;letter-spacing:.09em}
+.actionCard b{font-size:8px;line-height:1.08}
+.actionCard small{font-size:6.5px;line-height:1.05}
+.menuHero h3{font-size:16px}
+.menuHero p{font-size:9px}
+.menuHero .eyebrow{font-size:7px}
+.menuStat small{font-size:7px}
+.menuStat b{font-size:15px}
+.listCard .grow b{font-size:10px}
+.listCard .grow small{font-size:7px}
+.listCard .rightText{font-size:8px}
+.settingRow b{font-size:10px}
+.settingRow small{font-size:7px}
+.creatorLabel b{font-size:9px}
+.creatorLabel small{font-size:8px}
+.resourceCard{font-size:8px}
+.resourceCard b{font-size:14px}
+.civRow{font-size:9px;padding:6px 7px}
+.tech{font-size:8px;padding:4px 6px}
+.updateItem b{font-size:10px}
+.updateItem small{font-size:7px}
+.updateItem p{font-size:8px}
+.warningBox{font-size:8px}
+
+.actionGrid{grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+.actionCard{min-height:59px;padding:4px 2px}
+.actionCard .emoji{font-size:19px;line-height:20px}
+.menuBody{
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+  overflow-y:auto;
+  overflow-x:hidden;
+}
+.actionCard b,.actionCard small,.listCard .grow small{
+  white-space:normal;
+  overflow-wrap:anywhere;
+}
+
+/* Landscape menus become scrollable right-side panels.
+   This prevents God Powers / Resources catalogs being clipped. */
+@media (orientation:landscape) and (max-height:560px){
+  .gamesheet{
+    top:calc(env(safe-area-inset-top) + 6px)!important;
+    right:calc(env(safe-area-inset-right) + 6px)!important;
+    bottom:calc(env(safe-area-inset-bottom) + 6px)!important;
+    left:auto!important;
+    width:min(52vw,540px)!important;
+    height:auto!important;
+    max-height:none!important;
+    padding:6px 8px 8px!important;
+    border-radius:17px!important;
+    border:1px solid rgba(255,255,255,.11)!important;
+    transform:translateX(0)!important;
+    box-shadow:-15px 0 38px rgba(0,0,0,.33),inset 0 1px 0 rgba(255,255,255,.05)!important;
+  }
+  .gamesheet.hidden{
+    transform:translateX(110%)!important;
+    opacity:0!important;
+    pointer-events:none!important;
+  }
+  .sheetHandle{display:none}
+  .sheetHead{height:34px}
+  .sheetHead>div>b{font-size:14px}
+  .sheetHead .muted{font-size:7px}
+  .sheetHead .close{width:30px;min-width:30px;height:30px;min-height:30px}
+  .segments{
+    margin:1px -1px 4px;
+    max-width:100%;
+    flex-wrap:nowrap;
+    overflow-x:auto;
+  }
+  .segment{height:27px;min-height:27px;font-size:7px;padding:0 7px}
+  .menuBody{
+    height:calc(100% - 40px)!important;
+    max-height:none!important;
+    overflow-y:auto!important;
+    overflow-x:hidden!important;
+    padding:0 1px 12px!important;
+  }
+  .segments:not(.hidden)+.menuBody{height:calc(100% - 72px)!important}
+  .actionGrid{grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+  .actionCard{min-height:55px}
+  .actionCard .emoji{font-size:18px}
+  .actionCard b{font-size:7.5px}
+  .actionCard small{font-size:6px}
+  .menuHero{padding:8px;margin-bottom:5px}
+  .menuHero h3{font-size:14px}
+  .menuHero p{font-size:8px}
+  .menuGrid{grid-template-columns:repeat(4,1fr);gap:4px}
+  .menuStat{min-height:48px;padding:6px}
+  .resourceGrid{grid-template-columns:repeat(5,1fr);gap:4px}
+  .resourceCard{padding:5px}
+  .resourceCard b{font-size:12px}
+  .creatorRow{padding:5px 6px;margin-bottom:4px}
+  .creatorLabel{margin-bottom:2px}
+  .creatorRow input[type="range"]{height:18px}
+  .listCard{min-height:38px;padding:5px}
+  .listCard .avatar{width:27px;height:27px;font-size:14px}
+  .settingRow{padding:6px;margin-bottom:4px}
+  .bigAction{min-height:34px;font-size:9px}
+
+  .mainnav{
+    left:calc(env(safe-area-inset-left) + 6px);
+    right:auto;
+    bottom:calc(env(safe-area-inset-bottom) + 6px);
+    width:210px;
+    height:46px;
+    grid-template-columns:repeat(3,1fr);
+  }
+  .navtab{height:38px;min-height:38px}
+  .navtab span{font-size:15px}
+  .navtab b{font-size:7px}
+  .toolchip{
+    left:calc(env(safe-area-inset-left) + 6px);
+    bottom:calc(env(safe-area-inset-bottom) + 57px);
+    height:38px;min-height:38px;
+  }
+  .toolchip>span{font-size:16px}
+  .toolchip>div b{font-size:9px}
+  .toolchip>div small{font-size:6.5px}
+  .toolchip button{height:29px;min-height:29px}
+
+  .minimapPanel:not(.compact){
+    width:126px;
+    top:calc(env(safe-area-inset-top) + 53px);
+  }
+  #miniMap{height:70px}
+}
+@media (orientation:landscape) and (max-height:430px){
+  .gamesheet{width:min(48vw,470px)!important}
+  .actionGrid{grid-template-columns:repeat(5,minmax(0,1fr))}
+  .actionCard{min-height:50px}
+  .menuSection{margin:7px 0 3px}
+  .menuHero{display:none}
+}
