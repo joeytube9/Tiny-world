@@ -1,26 +1,25 @@
-Tiny World V8.1 — LIVING OCEAN
+Tiny World V8.2 — NATURAL EFFECTS
 
-This update keeps the V8 painted-world art direction and specifically fixes the ocean motion.
+LIGHTNING
+- Lightning no longer paints a field of orange triangular markers.
+- The impact is now limited to actual land.
+- Each use creates a branching animated lightning bolt from the sky.
+- A brief pale flash and small impact sparks sell the strike.
+- Only a few impact cells are scorched instead of an entire visible grid.
 
-REAL-TIME WATER
-- Water animation now uses requestAnimationFrame time directly.
-- Ocean animation no longer depends on Tiny World's slower simulation tick.
-- Water continues moving even when the civilization is paused.
-- ×1, ×2 and ×5 no longer change the visual wave speed.
+FIRE
+- Fire no longer displays an identical triangle on every burning tile.
+- Burning ground now produces sparse, offset animated flame clusters.
+- Flames have outer red/orange shapes, hot inner cores and rising embers.
+- Initial ignition creates a short burst effect.
+- Fire placement itself is patchier and more organic.
 
-OCEAN MOTION
-- Large wave bands visibly travel across the ocean.
-- Secondary ripples move independently.
-- Whitecaps shift instead of sitting in fixed positions.
-- Shore foam moves toward and away from land.
-- Tide phase expands/retracts shallow surf continuously.
+OCEAN CLEANUP
+- Removed the height-driven turquoise glow that could extend far away from islands.
+- Deep water remains deep blue even over high underwater height values.
+- Turquoise shallows are now based on actual interpolated proximity to land.
+- Shore overlay no longer paints large translucent aqua ellipses.
+- Coastal color is now a tight shelf plus moving line/foam detail.
+- The old large atmospheric glow circle was removed as well.
 
-CLEANER WATER ART
-- Reduced the wide cloudy aqua patches seen in V8.
-- Turquoise shallows now stay much closer to the coastline.
-- Coastal glow/foam elements are smaller and less blotchy.
-
-BONUS
-- Tree sway uses the same smooth real-time visual clock.
-
-All V8 continuous terrain, custom world creation, God Powers, V6 living civilization systems, marriage/families, underground layer and variable world sizes remain.
+All V8 continuous terrain rendering, real-time ocean motion, world creation, God Powers, Living Civilization, families and underground systems remain.

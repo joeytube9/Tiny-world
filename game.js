@@ -46,7 +46,7 @@ const familyEnd=["born","brook","crest","field","ford","grove","hall","hart","me
 const usedNames=new Set(),usedFirstNames=new Set();
 const techNames=["Shelter","Storage","Agriculture","Stoneworking","Mining","Village Planning","Granaries","Roads"];
 
-let people=[],buildings=[],events=[],particles=[],clouds=[],constructionQueue=[],critters=[];
+let people=[],buildings=[],events=[],particles=[],clouds=[],constructionQueue=[],critters=[],visualEffects=[];
 let settlement=null,day=1,tick=0,paused=false,speed=1,tool="inspect",brush=12,selected=null,dirty=true,worldSeed=1,visualTime=0;
 let camX=WORLD_W/2,camY=WORLD_H/2,zoom=4,displayScale=1,pointers=new Map(),dragging=false,last={x:0,y:0},pinchStart=null,paintStamp=0,lastSim=0,toastTimer=null,nextPersonId=1,nextBuildingId=1,nextCritterId=1;
 let mainTab="world",worldSection="overview",newWorldArmed=false,resetWorldArmed=false;
@@ -81,48 +81,40 @@ function paintedVisualSample(wx,wy,px,py){
   let h=fieldSample(height,wx,wy),m=fieldSample(moisture,wx,wy);
   const forest=typeWeight(wx,wy,T.FOREST),grass=typeWeight(wx,wy,T.GRASS),sand=typeWeight(wx,wy,T.SAND);
   const mountain=typeWeight(wx,wy,T.MOUNTAIN),snow=typeWeight(wx,wy,T.SNOW),lava=typeWeight(wx,wy,T.LAVA);
-  const organic=(Math.sin(wx*.43+wy*.17+worldSeed*.013)+Math.sin(wx*.19-wy*.51+worldSeed*.021)+Math.cos(wx*.73+wy*.29))*0.0037;
+  const landWeight=clamp(forest+grass+sand+mountain+snow+lava,0,1);
+  const land=smoothstep(.10,.90,landWeight);
+  const organic=(Math.sin(wx*.43+wy*.17+worldSeed*.013)+Math.sin(wx*.19-wy*.51+worldSeed*.021)+Math.cos(wx*.73+wy*.29))*0.0032;
   h=clamp(h+organic,0,1);
-  m=clamp(m+forest*.24-grass*.035,0,1);
+  m=clamp(m+forest*.20-grass*.025,0,1);
 
-  const waterShift=(configValue("water")-50)*.0019-(configValue("landmass")-50)*.0018;
-  const deep=.255+waterShift,waterLine=.345+waterShift,sandLine=.398+waterShift;
-  const mountainShift=(50-configValue("mountains"))*.0017;
-  const snowLine=.855+mountainShift,mountainLine=.735+mountainShift;
-  const forestThreshold=.72-configValue("forest")*.0024;
+  // Deep ocean remains blue everywhere. Height changes its depth subtly,
+  // but no longer creates giant turquoise underwater halos.
+  const depthTone=clamp((h-.05)/.31,0,1);
+  let c=mixColor([7,55,91],[19,91,135],depthTone*.72);
 
-  const land=smoothstep(waterLine-.018,waterLine+.020,h);
-  const beach=smoothstep(waterLine-.005,sandLine+.025,h);
-  const grassIn=smoothstep(sandLine-.010,sandLine+.050,h);
-  const mountainIn=smoothstep(mountainLine-.050,mountainLine+.040,h);
-  const snowIn=smoothstep(snowLine-.035,snowLine+.025,h);
-  const forestIn=smoothstep(forestThreshold-.12,forestThreshold+.07,m)*smoothstep(sandLine+.01,mountainLine-.04,h);
+  // Turquoise exists ONLY where bilinear terrain weights are already
+  // transitioning into actual land: roughly a one-cell visual shelf.
+  const shoreWater=(1-land)*smoothstep(.025,.48,landWeight);
+  c=mixColor(c,[52,157,182],shoreWater*.62);
 
-  let deepC=mixColor([8,55,91],[16,82,129],smoothstep(.04,deep,h));
-  let shallow=mixColor([32,128,169],[95,207,222],smoothstep(deep,waterLine+.02,h));
-  let c=mixColor(deepC,shallow,smoothstep(deep-.03,waterLine+.01,h));
+  const sandC=mixColor([207,184,120],[238,219,164],clamp(.28+m*.12,0,1));
+  const grassC=mixColor([91,151,75],[132,187,101],clamp(m*.52+.20,0,1));
+  const forestC=mixColor([44,100,55],[72,139,72],clamp(m*.62+.08,0,1));
+  const mountainC=mixColor([101,106,107],[150,151,146],clamp((h-.60)*2.3,0,1));
+  const snowC=[232,239,240];
+  const lavaC=mixColor([113,36,21],[230,103,31],.50+.50*Math.sin(wx*.8+wy*.4));
 
-  const sandC=mixColor([212,190,126],[240,221,166],sand*.35+.25);
-  c=mixColor(c,sandC,land);
-  const grassC=mixColor([96,157,77],[132,190,101],clamp(m*.50+.18,0,1));
-  c=mixColor(c,grassC,grassIn);
-  const forestC=mixColor([46,103,56],[69,139,72],clamp(m*.65,0,1));
-  c=mixColor(c,forestC,clamp(forestIn+forest*.30,0,1));
-  const mountainC=mixColor([103,108,108],[151,151,145],smoothstep(mountainLine,snowLine,h));
-  c=mixColor(c,mountainC,clamp(mountainIn+mountain*.35,0,1));
-  const snowC=[232,239,239];
-  c=mixColor(c,snowC,clamp(snowIn+snow*.45,0,1));
-  const lavaC=mixColor([113,36,21],[231,106,32],.50+.50*Math.sin(wx*.8+wy*.4));
-  c=mixColor(c,lavaC,lava);
+  c=mixColor(c,sandC,clamp(sand,0,1));
+  c=mixColor(c,grassC,clamp(grass,0,1));
+  c=mixColor(c,forestC,clamp(forest,0,1));
+  c=mixColor(c,mountainC,clamp(mountain,0,1));
+  c=mixColor(c,snowC,clamp(snow,0,1));
+  c=mixColor(c,lavaC,clamp(lava,0,1));
 
-  const grain=(hash(px>>1,py>>1,worldSeed+444)-.5)*8;
-  const broad=(Math.sin(wx*.28+wy*.11)+Math.cos(wx*.15-wy*.23))*2.1;
+  const grain=(hash(px>>1,py>>1,worldSeed+444)-.5)*6.5;
+  const broad=(Math.sin(wx*.28+wy*.11)+Math.cos(wx*.15-wy*.23))*1.65;
   let [r,g,b]=c;
-  r+=grain+broad;g+=grain*.72+broad*1.15;b+=grain*.45+broad*.32;
-
-  // brighter aqua shelf immediately around the land
-  const shelf=(1-land)*smoothstep(waterLine-.028,waterLine+.006,h);
-  g+=shelf*12;b+=shelf*18;r+=shelf*3;
+  r+=grain+broad;g+=grain*.70+broad*1.05;b+=grain*.45+broad*.34;
 
   return [clamp(r,0,255),clamp(g,0,255),clamp(b,0,255),land]
 }
@@ -336,6 +328,12 @@ function visibleBounds(pad=6){const v=viewportWorldSize();return{l:camX-v.w/2-pa
 function brushNoise(x,y,cx,cy,r){return Math.hypot(x-cx,y-cy)/r+(hash(x,y,(tick>>3)%37)-.5)*.38}
 function spawnCloud(x,y,r){clouds.push({x,y,r:Math.max(8,r*.9),life:330,phase:rnd(0,Math.PI*2)})}
 function spawnParticles(type,x,y,count=10){for(let i=0;i<count;i++)particles.push({type,x:x+rnd(-1.3,1.3),y:y+rnd(-1.2,1.2),vx:rnd(-.08,.08),vy:rnd(-.18,.03),life:rndi(10,30)})}
+function spawnLightningStrike(x,y){
+  visualEffects.push({type:"lightning",x,y,start:visualTime,duration:.42,seed:Math.random()*10000})
+}
+function spawnFireBurst(x,y,r){
+  visualEffects.push({type:"fireBurst",x,y,r:Math.max(2,r*.28),start:visualTime,duration:.70,seed:Math.random()*10000})
+}
 function paint(cx,cy,r,type,record=true){
   for(let y=Math.max(0,Math.floor(cy-r-4));y<=Math.min(WORLD_H-1,Math.ceil(cy+r+4));y++)for(let x=Math.max(0,Math.floor(cx-r-4));x<=Math.min(WORLD_W-1,Math.ceil(cx+r+4));x++){
     const n=brushNoise(x,y,cx,cy,r);if(n>1)continue;
@@ -354,15 +352,15 @@ function paint(cx,cy,r,type,record=true){
     else if(type==="gold"&&terrain[i]>=T.SAND&&terrain[i]!==T.LAVA){if(Math.random()<.05+.20*p)gold[i]=clamp(gold[i]+1,0,4)}
     else if(type==="rain"){wet[i]=255;if((terrain[i]===T.GRASS||terrain[i]===T.FOREST)&&Math.random()<.08)food[i]=clamp(food[i]+1,0,7);if(burn[i])burn[i]=Math.max(0,burn[i]-90)}
     else if(type==="drought"){wet[i]=0;if(food[i]&&Math.random()<.20)food[i]--;if(trees[i]&&Math.random()<.035)trees[i]--}
-    else if(type==="fire"&&terrain[i]>=T.SAND&&terrain[i]!==T.SNOW&&terrain[i]!==T.LAVA){burn[i]=255;scar[i]=180;if(trees[i]&&Math.random()<.5)trees[i]--;if(food[i])food[i]=0}
+    else if(type==="fire"&&terrain[i]>=T.SAND&&terrain[i]!==T.SNOW&&terrain[i]!==T.LAVA&&Math.random()<.08+.34*p){burn[i]=Math.max(burn[i],rndi(195,255));scar[i]=Math.max(scar[i],rndi(120,185));if(trees[i]&&Math.random()<.42)trees[i]--;if(food[i]&&Math.random()<.80)food[i]=0}
     else if(type==="lava"){terrain[i]=T.LAVA;height[i]=.55;trees[i]=food[i]=rocks[i]=iron[i]=gold[i]=0;burn[i]=255;scar[i]=255}
-    else if(type==="lightning"&&n<.43){trees[i]=Math.max(0,trees[i]-2);food[i]=0;scar[i]=210;burn[i]=Math.max(burn[i],160)}
+    else if(type==="lightning"&&terrain[i]>=T.SAND&&terrain[i]!==T.SNOW&&terrain[i]!==T.LAVA&&n<.20&&hash(x,y,worldSeed+tick+991)>.79){trees[i]=Math.max(0,trees[i]-2);food[i]=0;scar[i]=Math.max(scar[i],190);burn[i]=Math.max(burn[i],rndi(105,165))}
   }
   dirty=true;
   if(type==="rain")spawnCloud(cx,cy,r);
-  if(type==="fire")spawnParticles("fire",cx,cy,22);
-  if(type==="lava")spawnParticles("fire",cx,cy,28);
-  if(type==="lightning")spawnParticles("spark",cx,cy,28);
+  if(type==="fire"){spawnParticles("fire",cx,cy,14);spawnFireBurst(cx,cy,r)}
+  if(type==="lava")spawnParticles("fire",cx,cy,22);
+  if(type==="lightning"){spawnParticles("spark",cx,cy,16);spawnLightningStrike(cx+rnd(-r*.10,r*.10),cy+rnd(-r*.10,r*.10))}
   if(record){
     const m={land:"The Creator raised new land.",water:"The Creator reshaped the sea.",grass:"Grassland spread across the world.",forest:"A forest spread by divine will.",sand:"The land was turned to desert.",snow:"A frozen biome formed.",mountain:"Mountains rose from the earth.",rain:"The Creator summoned rain.",drought:"A divine drought swept the land.",fire:"Divine fire was unleashed.",lava:"Lava erupted from the ground.",lightning:"Lightning tore through the land.",stone:"Stone deposits appeared.",iron:"Iron deposits appeared.",gold:"Gold deposits appeared.",trees:"Trees erupted from the soil.",food:"Food resources appeared."};
     if(m[type])addEvent(m[type],"divine")
@@ -1146,7 +1144,7 @@ function generate(useExistingSeed=false){
     people[0].relations[people[1].id]=36;people[1].relations[people[0].id]=36
   }
 
-  buildings=[];events=[];particles=[];clouds=[];critters=[];
+  buildings=[];events=[];particles=[];clouds=[];critters=[];visualEffects=[];
   day=1;tick=0;camX=sx;camY=sy;zoom=4;dirty=true;undergroundDirty=true;selected=null;
   activeLayer="surface";resourceLayer="surface";
   settlement={name:"First Hearth",x:sx,y:sy,food:configValue("startingFood"),wood:configValue("startingWood"),stone:0,iron:0,gold:0,coal:0,tech:new Set(),births:0,deaths:0};
@@ -1181,60 +1179,19 @@ function drawOrganicLandOverlay(){
 }
 function drawCoastalBlend(){
   const b=visibleBounds(4),z=cameraScale(),t=visualTime;
-  ctx.save();
+  ctx.save();ctx.lineCap="round";
   for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y++){
     for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x++){
       const i=idx(x,y),tt=terrain[i],shore=shorelineFactor(x,y);
-      if(shore<.08)continue;
-
-      const s=worldToScreen(x+.5,y+.5);
-      const waterVec=shorelineVector(x,y,true),landVec=shorelineVector(x,y,false);
-      const surge=.5+.5*Math.sin(t*1.65+x*.46+y*.29);
-
-      if(isWaterTile(tt)){
-        const dir=landVec.count?landVec:{x:0,y:0,count:0};
-
-        // Keep this compact so the aqua shelf stays attached to the coast.
-        ctx.fillStyle=`rgba(84,190,216,${.035+shore*.085})`;
-        ctx.beginPath();
-        ctx.ellipse(
-          s.x+dir.x*z*(.14+.12*surge),
-          s.y+dir.y*z*(.14+.12*surge),
-          z*(.40+shore*.28),
-          z*(.19+shore*.13),
-          Math.atan2(dir.y,dir.x),
-          0,Math.PI*2
-        );
-        ctx.fill();
-
-        if(shore>.16){
-          ctx.strokeStyle=`rgba(248,253,251,${.055+shore*.13})`;
-          ctx.lineWidth=Math.max(1,z*.055);
-          ctx.beginPath();
-          ctx.arc(
-            s.x+dir.x*z*(.25+.13*surge),
-            s.y+dir.y*z*(.25+.13*surge),
-            z*(.10+shore*.12),
-            Math.PI*.08,
-            Math.PI*1.18
-          );
-          ctx.stroke()
-        }
-      }else if(tt===T.SAND||tt===T.GRASS||tt===T.FOREST){
-        const dir=waterVec.count?waterVec:{x:0,y:0,count:0};
-        ctx.fillStyle=tt===T.SAND
-          ?`rgba(241,225,181,${.025+shore*.045})`
-          :`rgba(132,191,108,${.018+shore*.030})`;
-        ctx.beginPath();
-        ctx.ellipse(
-          s.x+dir.x*z*.10,
-          s.y+dir.y*z*.10,
-          z*(.34+shore*.15),
-          z*(.15+shore*.07),
-          Math.atan2(dir.y,dir.x),
-          0,Math.PI*2
-        );
-        ctx.fill()
+      if(!isWaterTile(tt)||shore<.12)continue;
+      const s=worldToScreen(x+.5,y+.5),dir=shorelineVector(x,y,false),surge=.5+.5*Math.sin(t*1.7+x*.46+y*.29),h=hash(x,y,worldSeed+530);
+      if(h>.30){
+        ctx.strokeStyle=`rgba(110,211,231,${.07+shore*.10})`;ctx.lineWidth=Math.max(1,z*.045);
+        ctx.beginPath();ctx.arc(s.x+dir.x*z*(.12+.09*surge),s.y+dir.y*z*(.12+.09*surge),z*(.13+shore*.11),Math.PI*.08,Math.PI*1.18);ctx.stroke()
+      }
+      if(shore>.18&&h>.56){
+        ctx.strokeStyle=`rgba(249,253,251,${.08+shore*.13})`;ctx.lineWidth=Math.max(1,z*.05);
+        ctx.beginPath();ctx.arc(s.x+dir.x*z*(.21+.11*surge),s.y+dir.y*z*(.21+.11*surge),z*(.08+shore*.09),Math.PI*.10,Math.PI*1.16);ctx.stroke()
       }
     }
   }
@@ -1242,111 +1199,41 @@ function drawCoastalBlend(){
 }
 function drawWater(){
   const b=visibleBounds(5),z=cameraScale(),t=visualTime;
-  ctx.save();
-  ctx.lineCap="round";
+  ctx.save();ctx.lineCap="round";
 
-  // Long ocean swells travel diagonally across the water.
-  // These are based on real elapsed time, not the civilization simulation tick.
-  const bandGap=6.6;
-  const travel=(t*2.3)%bandGap;
-  const baseRow=Math.floor((b.t-12)/bandGap)*bandGap;
+  const bandGap=6.8,travel=(t*2.15)%bandGap,baseRow=Math.floor((b.t-12)/bandGap)*bandGap;
   for(let wy=baseRow;wy<b.b+14;wy+=bandGap){
     const waveY=wy+travel;
     for(let wx=Math.floor((b.l-14)/10)*10;wx<b.r+14;wx+=10){
-      const cx=wx+Math.sin(t*.65+wy*.18)*2.7;
-      const cy=waveY+Math.sin(t*.48+wx*.11)*.55;
+      const cx=wx+Math.sin(t*.62+wy*.18)*2.45,cy=waveY+Math.sin(t*.46+wx*.11)*.48;
       const tx=clamp(Math.round(cx),0,WORLD_W-1),ty=clamp(Math.round(cy),0,WORLD_H-1);
       if(!isWaterTile(terrain[idx(tx,ty)]))continue;
-
-      const s=worldToScreen(cx,cy);
-      const curl=Math.sin(t*2.6+wx*.25+wy*.31);
-      const len=z*(2.2+hash(tx,ty,worldSeed+710)*1.25);
-
-      ctx.strokeStyle="rgba(229,246,251,.15)";
-      ctx.lineWidth=Math.max(1,z*.075);
-      ctx.beginPath();
-      ctx.moveTo(s.x-len,s.y+curl*z*.16);
-      ctx.bezierCurveTo(
-        s.x-len*.38,s.y-curl*z*.34,
-        s.x+len*.36,s.y+curl*z*.28,
-        s.x+len,s.y-curl*z*.12
-      );
-      ctx.stroke();
-
-      if(hash(tx,ty,worldSeed+711)>.58){
-        ctx.strokeStyle="rgba(182,225,240,.10)";
-        ctx.lineWidth=Math.max(1,z*.05);
-        ctx.beginPath();
-        ctx.moveTo(s.x-len*.52,s.y+z*.36-curl*z*.08);
-        ctx.quadraticCurveTo(s.x,s.y+z*.18+curl*z*.12,s.x+len*.54,s.y+z*.35-curl*z*.05);
-        ctx.stroke()
-      }
+      const s=worldToScreen(cx,cy),curl=Math.sin(t*2.45+wx*.25+wy*.31),len=z*(2.0+hash(tx,ty,worldSeed+710)*1.15);
+      ctx.strokeStyle="rgba(226,245,251,.13)";ctx.lineWidth=Math.max(1,z*.067);
+      ctx.beginPath();ctx.moveTo(s.x-len,s.y+curl*z*.13);ctx.bezierCurveTo(s.x-len*.38,s.y-curl*z*.29,s.x+len*.36,s.y+curl*z*.24,s.x+len,s.y-curl*z*.10);ctx.stroke();
+      if(hash(tx,ty,worldSeed+711)>.61){ctx.strokeStyle="rgba(175,222,238,.075)";ctx.lineWidth=Math.max(1,z*.045);ctx.beginPath();ctx.moveTo(s.x-len*.48,s.y+z*.33-curl*z*.06);ctx.quadraticCurveTo(s.x,s.y+z*.17+curl*z*.09,s.x+len*.50,s.y+z*.32-curl*z*.04);ctx.stroke()}
     }
   }
 
-  // Smaller ripples and tidal surf.
   const step=zoom<3?2:1;
   for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step){
     for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){
-      const i=idx(x,y),tt=terrain[i];
-      if(!isWaterTile(tt))continue;
+      const i=idx(x,y);if(!isWaterTile(terrain[i]))continue;
+      const shore=shorelineFactor(x,y),dir=shorelineVector(x,y,false),h=hash(x,y,worldSeed+333),wave=Math.sin(t*3.0+x*.88+y*.34),wave2=Math.cos(t*2.4-x*.31+y*.59),tide=.5+.5*Math.sin(t*1.08+x*.11+y*.08);
+      const s=worldToScreen(x+.5+Math.sin(t*.70+x*.07-y*.03)*.07,y+.5+Math.cos(t*.58+x*.04)*.035);
 
-      const shore=shorelineFactor(x,y),dir=shorelineVector(x,y,false);
-      const h=hash(x,y,worldSeed+333);
-      const wave=Math.sin(t*3.3+x*.88+y*.34);
-      const wave2=Math.cos(t*2.55-x*.31+y*.59);
-      const tide=.5+.5*Math.sin(t*1.15+x*.11+y*.08);
-      const drift=(t*.72+x*.07-y*.03);
-
-      const s=worldToScreen(
-        x+.5+Math.sin(drift)*.08,
-        y+.5+Math.cos(drift*.83)*.045
-      );
-
-      // Moving turquoise water close to shore.
-      if(shore>.045){
-        ctx.fillStyle=`rgba(104,205,228,${.045+shore*.105})`;
-        ctx.beginPath();
-        ctx.ellipse(
-          s.x+dir.x*z*(.10+.16*tide),
-          s.y+dir.y*z*(.10+.16*tide),
-          z*(.28+shore*.26+tide*.08),
-          z*(.13+shore*.12),
-          Math.atan2(dir.y,dir.x),
-          0,Math.PI*2
-        );
-        ctx.fill()
+      if(shore>.13&&h>.18){
+        const push=.16+.15*tide;
+        ctx.strokeStyle=`rgba(252,254,252,${.10+shore*.20})`;ctx.lineWidth=Math.max(1,z*.065);
+        ctx.beginPath();ctx.arc(s.x+dir.x*z*push,s.y+dir.y*z*push,z*(.11+shore*.13),Math.PI*.06,Math.PI*1.15);ctx.stroke()
       }
-
-      // White shore crest moves in/out.
-      if(shore>.13&&h>.13){
-        const push=.17+.18*tide;
-        ctx.strokeStyle=`rgba(252,254,252,${.10+shore*.22})`;
-        ctx.lineWidth=Math.max(1,z*.075);
-        ctx.beginPath();
-        ctx.arc(
-          s.x+dir.x*z*push,
-          s.y+dir.y*z*push,
-          z*(.12+shore*.16),
-          Math.PI*.06,
-          Math.PI*1.15
-        );
-        ctx.stroke()
-      }
-
-      // Animated local ripples.
-      if(h>.58){
-        const rippleLen=z*(.30+h*.30);
-        ctx.strokeStyle="rgba(232,248,252,.12)";
-        ctx.lineWidth=Math.max(1,z*.045);
-        ctx.beginPath();
-        ctx.moveTo(s.x-rippleLen+wave*z*.12,s.y+wave2*z*.08);
-        ctx.quadraticCurveTo(s.x,s.y-wave*z*.13,s.x+rippleLen+wave*z*.12,s.y+wave2*z*.04);
-        ctx.stroke()
+      if(h>.61){
+        const rippleLen=z*(.28+h*.27);
+        ctx.strokeStyle="rgba(231,247,252,.095)";ctx.lineWidth=Math.max(1,z*.040);
+        ctx.beginPath();ctx.moveTo(s.x-rippleLen+wave*z*.10,s.y+wave2*z*.06);ctx.quadraticCurveTo(s.x,s.y-wave*z*.11,s.x+rippleLen+wave*z*.10,s.y+wave2*z*.03);ctx.stroke()
       }
     }
   }
-
   ctx.restore()
 }
 function drawGroundDetails(){
@@ -1560,8 +1447,9 @@ function drawMiniMap(){
   mmctx.strokeStyle=activeLayer==="surface"?"#b5ff9f":"#ffd08c";mmctx.lineWidth=2;mmctx.strokeRect(left,top,vw,vh);mmctx.fillStyle=activeLayer==="surface"?"rgba(181,255,159,.10)":"rgba(255,208,140,.10)";mmctx.fillRect(left,top,vw,vh)
 }
 function drawSurfaceAtmosphere(){
-  const sky=ctx.createLinearGradient(0,0,0,canvas.height*.6);sky.addColorStop(0,"rgba(203,236,255,.12)");sky.addColorStop(.55,"rgba(255,255,255,0)");
-  ctx.fillStyle=sky;ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle="rgba(255,247,186,.07)";ctx.beginPath();ctx.arc(canvas.width*.72,canvas.height*.12,canvas.width*.20,0,Math.PI*2);ctx.fill()
+  const sky=ctx.createLinearGradient(0,0,0,canvas.height*.55);
+  sky.addColorStop(0,"rgba(203,236,255,.065)");sky.addColorStop(.62,"rgba(255,255,255,0)");
+  ctx.fillStyle=sky;ctx.fillRect(0,0,canvas.width,canvas.height)
 }
 function drawVignette(){
   const g=ctx.createRadialGradient(canvas.width*.5,canvas.height*.42,canvas.width*.15,canvas.width*.5,canvas.height*.48,canvas.width*.78);g.addColorStop(0,"rgba(0,0,0,0)");g.addColorStop(1,"rgba(4,8,10,.18)");
@@ -1603,18 +1491,120 @@ function drawCritter(c){
   ctx.beginPath();ctx.moveTo(s.x+dir*z*.32,s.y-z*.18+bob);ctx.lineTo(s.x+dir*z*.39,s.y-z*.34+bob);ctx.moveTo(s.x+dir*z*.39,s.y-z*.30+bob);ctx.lineTo(s.x+dir*z*.47,s.y-z*.39+bob);ctx.stroke()
 }
 function drawHazards(){
-  const b=visibleBounds(2),z=cameraScale();
-  for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=2)for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=2){
-    const i=idx(x,y),s=worldToScreen(x+.5,y+.5);
-    if(terrain[i]===T.LAVA){
-      ctx.fillStyle=`rgba(255,123,37,${.30+.18*Math.sin(tick*.08+x)})`;ctx.beginPath();ctx.arc(s.x,s.y,Math.max(2,z*.5),0,Math.PI*2);ctx.fill()
-    }else if(burn[i]>50){
-      const f=burn[i]/255;ctx.fillStyle=`rgba(255,111,38,${.25+.45*f})`;ctx.beginPath();ctx.moveTo(s.x,s.y-z*.8*f);ctx.lineTo(s.x-z*.28,s.y+z*.25);ctx.lineTo(s.x+z*.28,s.y+z*.25);ctx.fill()
+  const b=visibleBounds(3),z=cameraScale(),t=visualTime;
+  for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y++){
+    for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x++){
+      const i=idx(x,y),burnAmt=burn[i],tile=terrain[i];
+      if(tile===T.LAVA){
+        if(hash(x,y,worldSeed+505)<.60)continue;
+        const jx=(hash(x,y,506)-.5)*.60,jy=(hash(x,y,507)-.5)*.44,s=worldToScreen(x+.5+jx,y+.5+jy);
+        const pulse=.5+.5*Math.sin(t*3.0+x*.7+y*.4);
+        ctx.fillStyle=`rgba(232,77,26,${.25+.18*pulse})`;
+        ctx.beginPath();ctx.ellipse(s.x,s.y,z*(.30+.10*pulse),z*(.16+.06*pulse),0,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle=`rgba(255,189,69,${.28+.20*pulse})`;
+        ctx.beginPath();ctx.ellipse(s.x-z*.04,s.y-z*.03,z*.12,z*.07,0,0,Math.PI*2);ctx.fill();
+        continue
+      }
+      if(burnAmt<70)continue;
+      // Only a subset of burning cells gets a visible flame, and each one is
+      // offset from the tile center so a fire reads as an irregular blaze.
+      const gate=hash(x,y,worldSeed+620);
+      if(gate<.70)continue;
+      const strength=burnAmt/255,jx=(hash(x,y,621)-.5)*.76,jy=(hash(x,y,622)-.5)*.60;
+      const s=worldToScreen(x+.5+jx,y+.55+jy),flick=.72+.28*Math.sin(t*8.0+x*1.3+y*.8+gate*8),size=z*(.24+.32*strength)*flick;
+
+      ctx.fillStyle='rgba(0,0,0,.13)';ctx.beginPath();ctx.ellipse(s.x,s.y+size*.72,size*.58,size*.18,0,0,Math.PI*2);ctx.fill();
+
+      ctx.fillStyle=`rgba(222,66,26,${.58+.20*strength})`;
+      ctx.beginPath();
+      ctx.moveTo(s.x,s.y-size*1.25);
+      ctx.bezierCurveTo(s.x-size*.66,s.y-size*.35,s.x-size*.46,s.y+size*.55,s.x,s.y+size*.65);
+      ctx.bezierCurveTo(s.x+size*.52,s.y+size*.48,s.x+size*.62,s.y-size*.28,s.x,s.y-size*1.25);
+      ctx.fill();
+
+      ctx.fillStyle=`rgba(255,153,48,${.70+.20*strength})`;
+      ctx.beginPath();
+      ctx.moveTo(s.x+size*.02,s.y-size*.78);
+      ctx.bezierCurveTo(s.x-size*.34,s.y-size*.18,s.x-size*.24,s.y+size*.37,s.x,s.y+size*.44);
+      ctx.bezierCurveTo(s.x+size*.30,s.y+size*.30,s.x+size*.32,s.y-size*.12,s.x+size*.02,s.y-size*.78);
+      ctx.fill();
+
+      ctx.fillStyle='rgba(255,224,120,.90)';ctx.beginPath();ctx.ellipse(s.x,s.y+size*.08,size*.12,size*.20,0,0,Math.PI*2);ctx.fill();
+
+      if(hash(x,y,623)>.82){
+        ctx.fillStyle='rgba(255,190,71,.75)';
+        const ex=s.x+Math.sin(t*5+x)*size*.65,ey=s.y-size*(1.0+((t*.8+gate)%1));
+        ctx.beginPath();ctx.arc(ex,ey,Math.max(1,size*.06),0,Math.PI*2);ctx.fill()
+      }
     }
   }
 }
 
-function drawParticles(){for(const p of particles){const s=worldToScreen(p.x,p.y),q=Math.max(1.5,cameraScale()*.20);ctx.fillStyle=p.type==="spark"?"#fff0a4":p.type==="fire"?"#ff7a35":p.type==="heal"?"#b7f6d2":p.type==="grain"?"#d8bd58":p.type==="stone"?"#aeb3ae":p.type==="dust"?"#b18b5b":"#69a95b";ctx.fillRect(s.x-q/2,s.y-q/2,q,q)}}
+function drawParticles(){
+  for(const p of particles){
+    const s=worldToScreen(p.x,p.y),z=Math.max(1.5,cameraScale()*.20),life=clamp(p.life/30,0,1);
+    if(p.type==="spark"){
+      ctx.strokeStyle=`rgba(255,239,155,${.35+.60*life})`;ctx.lineWidth=Math.max(1,z*.34);
+      ctx.beginPath();ctx.moveTo(s.x-z*.7,s.y+z*.6);ctx.lineTo(s.x+z*.5,s.y-z*.7);ctx.stroke();
+      ctx.fillStyle=`rgba(255,255,224,${.45+.50*life})`;ctx.beginPath();ctx.arc(s.x,s.y,Math.max(1,z*.26),0,Math.PI*2);ctx.fill();continue
+    }
+    if(p.type==="fire"){
+      ctx.fillStyle=`rgba(255,118,38,${.30+.55*life})`;ctx.beginPath();ctx.ellipse(s.x,s.y,z*.45,z*.72,0,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle=`rgba(255,217,101,${.35+.50*life})`;ctx.beginPath();ctx.ellipse(s.x,s.y+z*.10,z*.18,z*.31,0,0,Math.PI*2);ctx.fill();continue
+    }
+    const col=p.type==="heal"?"183,246,210":p.type==="grain"?"216,189,88":p.type==="stone"?"174,179,174":p.type==="dust"?"177,139,91":"105,169,91";
+    ctx.fillStyle=`rgba(${col},${.25+.65*life})`;ctx.beginPath();ctx.arc(s.x,s.y,z*.38,0,Math.PI*2);ctx.fill()
+  }
+}
+function drawTransientEffects(){
+  if(!visualEffects.length)return;
+  const now=visualTime;
+  visualEffects=visualEffects.filter(e=>now-e.start<e.duration);
+  let flash=0;
+
+  for(const e of visualEffects){
+    const age=now-e.start,p=clamp(age/e.duration,0,1),s=worldToScreen(e.x,e.y),z=cameraScale();
+    if(e.type==="lightning"){
+      const alpha=1-p,segments=8,topY=Math.max(-canvas.height*.08,s.y-canvas.height*.58);
+      const stepY=(s.y-topY)/segments;
+      const pts=[];
+      for(let n=0;n<=segments;n++){
+        const yy=topY+n*stepY;
+        const envelope=Math.sin((n/segments)*Math.PI);
+        const xx=lerp(s.x+Math.sin(e.seed)*z*2.2,s.x,n/segments)+Math.sin(e.seed+n*12.73+Math.floor(age*36))*z*(.75+1.1*envelope);
+        pts.push([xx,yy])
+      }
+
+      ctx.save();
+      ctx.shadowColor='rgba(112,196,255,.95)';ctx.shadowBlur=Math.max(8,z*1.5);
+      ctx.strokeStyle=`rgba(135,211,255,${.30+.45*alpha})`;ctx.lineWidth=Math.max(3,z*.38);
+      ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);for(let n=1;n<pts.length;n++)ctx.lineTo(pts[n][0],pts[n][1]);ctx.stroke();
+      ctx.shadowBlur=Math.max(4,z*.6);ctx.strokeStyle=`rgba(255,255,245,${.55+.45*alpha})`;ctx.lineWidth=Math.max(1.4,z*.14);
+      ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);for(let n=1;n<pts.length;n++)ctx.lineTo(pts[n][0],pts[n][1]);ctx.stroke();
+
+      // Two small branches, not a field of symbols.
+      for(let branch=0;branch<2;branch++){
+        const n=3+branch*2,[bx,by]=pts[n],side=branch?1:-1;
+        ctx.strokeStyle=`rgba(205,236,255,${.30+.35*alpha})`;ctx.lineWidth=Math.max(1,z*.07);
+        ctx.beginPath();ctx.moveTo(bx,by);ctx.lineTo(bx+side*z*(1.2+branch*.4),by+z*.65);ctx.lineTo(bx+side*z*(1.9+branch*.5),by+z*1.35);ctx.stroke()
+      }
+      ctx.restore();
+
+      ctx.fillStyle=`rgba(255,239,153,${.24+.50*alpha})`;ctx.beginPath();ctx.arc(s.x,s.y,z*(.34+.22*alpha),0,Math.PI*2);ctx.fill();
+      flash=Math.max(flash,.18*alpha)
+    }else if(e.type==="fireBurst"){
+      const a=(1-p),r=z*e.r*(.25+.75*p);
+      ctx.strokeStyle=`rgba(255,145,45,${.30*a})`;ctx.lineWidth=Math.max(1,z*.08);
+      ctx.beginPath();ctx.arc(s.x,s.y,r*.55,0,Math.PI*2);ctx.stroke();
+      for(let n=0;n<8;n++){
+        const ang=n/8*Math.PI*2+e.seed,rr=r*(.30+.65*p),ex=s.x+Math.cos(ang)*rr,ey=s.y+Math.sin(ang)*rr*.48-r*.15*p;
+        ctx.fillStyle=`rgba(255,${120+n*8},45,${.50*a})`;ctx.beginPath();ctx.arc(ex,ey,Math.max(1,z*.08*(1-p*.35)),0,Math.PI*2);ctx.fill()
+      }
+    }
+  }
+
+  if(flash>0){ctx.fillStyle=`rgba(219,241,255,${flash})`;ctx.fillRect(0,0,canvas.width,canvas.height)}
+}
 function drawClouds(){if(!settings.effects)return;for(const c of clouds){const s=worldToScreen(c.x,c.y),z=Math.max(10,c.r*cameraScale()*.45);ctx.fillStyle="rgba(198,209,210,.42)";for(let n=0;n<5;n++){ctx.beginPath();ctx.arc(s.x+(n-2)*z*.46,s.y+Math.sin(c.phase+n)*z*.13,z*(.52+(n%2)*.12),0,Math.PI*2);ctx.fill()}ctx.strokeStyle="rgba(176,214,232,.40)";ctx.lineWidth=Math.max(1,cameraScale()*.09);for(let n=0;n<12;n++){const rx=s.x-z*1.3+(n/11)*z*2.6;ctx.beginPath();ctx.moveTo(rx,s.y+z*.3);ctx.lineTo(rx-z*.10,s.y+z*.9);ctx.stroke()}}}
 function drawLighting(){
   if(!settings.dayNight)return;const cycle=(tick%2600)/2600;let a=0;if(cycle<.18)a=.26*(1-cycle/.18);else if(cycle>.78)a=.30*((cycle-.78)/.22);
@@ -1625,7 +1615,7 @@ function render(){
   if(dirty)rebuildTerrain();clampCamera();ctx.fillStyle="#1c4f6f";ctx.fillRect(0,0,canvas.width,canvas.height);
   const s=cameraScale(),v=viewportWorldSize(),viewLeft=camX-v.w/2,viewTop=camY-v.h/2,wl=Math.max(0,viewLeft),wt=Math.max(0,viewTop),wr=Math.min(WORLD_W,viewLeft+v.w),wb=Math.min(WORLD_H,viewTop+v.h);
   if(wr>wl&&wb>wt){ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";ctx.drawImage(terrainCanvas,wl*TEX,wt*TEX,(wr-wl)*TEX,(wb-wt)*TEX,(wl-viewLeft)*s,(wt-viewTop)*s,(wr-wl)*s,(wb-wt)*s)}
-  drawOrganicLandOverlay();drawCoastalBlend();drawSurfaceAtmosphere();drawWater();if(settings.trails)drawTrails();drawGroundDetails();drawHazards();drawTerrainFeatures();buildings.slice().sort((a,b)=>a.y-b.y).forEach(drawBuilding);critters.slice().sort((a,b)=>a.py-b.py).forEach(drawCritter);people.filter(p=>p.layer!=="underground").sort((a,b)=>a.py-b.py).forEach(drawPerson);if(settings.effects)drawParticles();drawClouds();drawLighting();drawVignette();drawMiniMap()
+  drawOrganicLandOverlay();drawCoastalBlend();drawSurfaceAtmosphere();drawWater();if(settings.trails)drawTrails();drawGroundDetails();drawHazards();drawTerrainFeatures();buildings.slice().sort((a,b)=>a.y-b.y).forEach(drawBuilding);critters.slice().sort((a,b)=>a.py-b.py).forEach(drawCritter);people.filter(p=>p.layer!=="underground").sort((a,b)=>a.py-b.py).forEach(drawPerson);if(settings.effects){drawParticles();drawTransientEffects()}drawClouds();drawLighting();drawVignette();drawMiniMap()
 }
 function eraName(){const pop=people.filter(p=>p.alive).length;if(pop>=18)return"Village";if(pop>=10)return"Hamlet";if(pop>=5)return"Growing Camp";if(buildingsOf("hut").length)return"Early Settlement";return"Primitive"}
 function jobCounts(){const c={};for(const p of people.filter(p=>p.alive)){c[p.job]=(c[p.job]||0)+1}return c}
@@ -1796,8 +1786,8 @@ function settingsHtml(){
   <div class="menuSection">World management</div><button class="bigAction" data-action="center-world" type="button">⌾ Center on First Hearth</button><button class="bigAction" data-action="open-world-creator" type="button">🌍 Open World Creator</button><button class="bigAction danger" data-action="open-world-reset" type="button">↺ Reset Current World</button>`
 }
 function updatesHtml(){
-  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V8.1 · Living Ocean</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
-  <div class="updateItem"><b>V8.1 — Living Ocean</b><small>Current</small><p>Ocean animation is now driven by real elapsed frame time instead of civilization ticks. Long wave bands travel across the sea continuously, local ripples drift, shoreline foam pulses in and out, and the bright aqua shelf has been tightened so it stays close to the coast.</p></div><div class="updateItem"><b>V8 — Premium Painted World</b><small>Previous</small><p>The surface renderer moved to continuous height/moisture sampling with smoothed terrain, mixed forests and upgraded miniature people and wildlife.</p></div><div class="updateItem"><b>V7.2 — Painted World Pass</b><small>Previous</small><p>Added larger painterly land dabs, softer shore blending, stronger surf and more organic forest shapes.</p></div><div class="updateItem"><b>V7.1 — Brushed World Pass</b><small>Previous</small><p>Terrain leans harder into a brushed look with stronger painterly dabs, forests render more organically, and water has much more visible motion and shoreline surf.</p></div><div class="updateItem"><b>V7 — Premium Art Pass</b><small>Previous</small><p>The world now uses a richer painterly land overlay, softer coastal blending, more alive shore water, refined huts and farms, and upgraded tiny sprites so citizens and animals feel like miniature living beings in a premium-looking world.</p></div><div class="updateItem"><b>V6.6 — Organic Terrain + Sprite Overhaul</b><small>Previous</small><p>Coastlines became softer, shoreline water gained a light tide effect, wave motion became more visible, and both citizens and animals received upgraded tiny vector sprites.</p></div><div class="updateItem"><b>V6.5 — Grand Graphics Overhaul</b><small>Previous</small><p>The world surface was rebuilt with sharper texturing, richer biome color, animated wave motion, improved shoreline foam, bush-like food clusters, cleaner low-zoom forest rendering and stronger visual grounding between the land and the citizens.</p></div><div class="updateItem"><b>V6 — Living Civilization</b><small>Previous</small><p>Citizens age, learn, build skills, form households, create families, experience grief and leave a lineage behind.</p></div><div class="updateItem"><b>V5.4 — World Scale</b><small>Previous</small><p>Dynamic 100×100 through 500×500 world sizes.</p></div><div class="updateItem"><b>V5.3 — Family & Marriage</b><small>Previous</small><p>Dating, emotional bonds, marriage, shared surnames, breakups and child surname inheritance.</p></div><div class="updateItem"><b>V5.2 — Responsive World</b><small>Previous</small><p>Responsive landscape catalogs, smaller wording and procedural unique names.</p></div><div class="updateItem"><b>V5.1 — Living World</b><small>Previous</small><p>Compact HUD, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs and relationships.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
+  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V8.2 · Natural Effects</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
+  <div class="updateItem"><b>V8.2 — Natural Effects</b><small>Current</small><p>Lightning is now a real branching strike with a brief flash instead of a grid of hazard markers. Fire uses irregular animated flame clusters and embers. The broad turquoise ocean halo was removed at the terrain-color level, leaving only a narrow coastal shallows transition and moving foam.</p></div><div class="updateItem"><b>V8.1 — Living Ocean</b><small>Previous</small><p>Ocean animation moved to real elapsed frame time with traveling wave bands and tidal surf.</p></div><div class="updateItem"><b>V8 — Premium Painted World</b><small>Previous</small><p>The surface renderer moved to continuous height/moisture sampling with smoothed terrain, mixed forests and upgraded miniature people and wildlife.</p></div><div class="updateItem"><b>V7.2 — Painted World Pass</b><small>Previous</small><p>Added larger painterly land dabs, softer shore blending, stronger surf and more organic forest shapes.</p></div><div class="updateItem"><b>V7.1 — Brushed World Pass</b><small>Previous</small><p>Terrain leans harder into a brushed look with stronger painterly dabs, forests render more organically, and water has much more visible motion and shoreline surf.</p></div><div class="updateItem"><b>V7 — Premium Art Pass</b><small>Previous</small><p>The world now uses a richer painterly land overlay, softer coastal blending, more alive shore water, refined huts and farms, and upgraded tiny sprites so citizens and animals feel like miniature living beings in a premium-looking world.</p></div><div class="updateItem"><b>V6.6 — Organic Terrain + Sprite Overhaul</b><small>Previous</small><p>Coastlines became softer, shoreline water gained a light tide effect, wave motion became more visible, and both citizens and animals received upgraded tiny vector sprites.</p></div><div class="updateItem"><b>V6.5 — Grand Graphics Overhaul</b><small>Previous</small><p>The world surface was rebuilt with sharper texturing, richer biome color, animated wave motion, improved shoreline foam, bush-like food clusters, cleaner low-zoom forest rendering and stronger visual grounding between the land and the citizens.</p></div><div class="updateItem"><b>V6 — Living Civilization</b><small>Previous</small><p>Citizens age, learn, build skills, form households, create families, experience grief and leave a lineage behind.</p></div><div class="updateItem"><b>V5.4 — World Scale</b><small>Previous</small><p>Dynamic 100×100 through 500×500 world sizes.</p></div><div class="updateItem"><b>V5.3 — Family & Marriage</b><small>Previous</small><p>Dating, emotional bonds, marriage, shared surnames, breakups and child surname inheritance.</p></div><div class="updateItem"><b>V5.2 — Responsive World</b><small>Previous</small><p>Responsive landscape catalogs, smaller wording and procedural unique names.</p></div><div class="updateItem"><b>V5.1 — Living World</b><small>Previous</small><p>Compact HUD, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs and relationships.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
   <div class="updateItem"><b>V4.1 — Underground</b><small>Previous</small><p>Surface/Underground toggle, caves, deep stone, underground lakes, magma, iron/gold/coal/crystal veins, mine entrances, tunneling miners and layer-aware god powers.</p></div>
   <div class="updateItem"><b>V4 — World Control</b><small>Previous</small><p>World, God Powers and Resources tabs; full people/village/history/settings panels; biome painting; fire and lava; iron and gold; wildlife; direct people spawning; persistent visual settings.</p></div>
   <div class="updateItem"><b>V3 — Civilization</b><small>Previous</small><p>Families, jobs, farms, stockpiles, building construction, discoveries and village growth.</p></div>
