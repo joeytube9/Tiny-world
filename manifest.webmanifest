@@ -1,7 +1,7 @@
 {
   "name": "Tiny World",
   "short_name": "Tiny World",
-  "description": "Tiny World V8.2 adds natural lightning strikes, irregular animated fire, cleaner deep-blue ocean color, narrow coastal shallows and moving surf.",
+  "description": "Tiny World V8.3 adds naturally generated shallow-water shelves and shoreline-oriented animated surf instead of open-ocean stripe waves.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

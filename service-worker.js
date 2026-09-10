@@ -1,4 +1,4 @@
-const CACHE="tiny-world-v8-2-natural-effects";
+const CACHE="tiny-world-v8-3-natural-coastline-water";
 const ASSETS=["./","./index.html","./styles.css","./game.js","./manifest.webmanifest","./apple-touch-icon.png","./icon-192.png","./icon-512.png"];
 self.addEventListener("install",event=>{event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)));self.skipWaiting()});
 self.addEventListener("activate",event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));self.clients.claim()});

@@ -15,7 +15,7 @@ const miniMap=document.getElementById("miniMap"),miniMapMode=document.getElement
 
 let WORLD_W=200,WORLD_H=200,N=WORLD_W*WORLD_H;
 const T={DEEP:0,WATER:1,SAND:2,GRASS:3,FOREST:4,MOUNTAIN:5,SNOW:6,LAVA:7};
-let terrain,height,moisture,food,trees,rocks,iron,gold,wet,scar,burn,trail;
+let terrain,height,moisture,food,trees,rocks,iron,gold,wet,scar,burn,trail,shoreDistance;
 const U={CAVE:0,DIRT:1,STONE:2,DEEP:3,WATER:4,MAGMA:5};
 let underground,uStone,uIron,uGold,uCoal,uCrystal,uGlow;
 let TEX=2;
@@ -29,7 +29,7 @@ function allocateWorld(size=200){
   terrain=new Uint8Array(N);height=new Float32Array(N);moisture=new Float32Array(N);
   food=new Uint8Array(N);trees=new Uint8Array(N);rocks=new Uint8Array(N);
   iron=new Uint8Array(N);gold=new Uint8Array(N);wet=new Uint8Array(N);
-  scar=new Uint8Array(N);burn=new Uint8Array(N);trail=new Uint8Array(N);
+  scar=new Uint8Array(N);burn=new Uint8Array(N);trail=new Uint8Array(N);shoreDistance=new Float32Array(N);
   underground=new Uint8Array(N);uStone=new Uint8Array(N);uIron=new Uint8Array(N);
   uGold=new Uint8Array(N);uCoal=new Uint8Array(N);uCrystal=new Uint8Array(N);
   uGlow=new Uint8Array(N);
@@ -77,6 +77,35 @@ function typeWeight(x,y,type){
   const a=terrain[idx(x0,y0)]===type?1:0,b=terrain[idx(x1,y0)]===type?1:0,c=terrain[idx(x0,y1)]===type?1:0,d=terrain[idx(x1,y1)]===type?1:0;
   return lerp(lerp(a,b,tx),lerp(c,d,tx),ty)
 }
+function rebuildShoreDistance(){
+  const INF=9999,diag=1.41421356;
+  for(let y=0;y<WORLD_H;y++)for(let x=0;x<WORLD_W;x++){
+    shoreDistance[idx(x,y)]=isLandTile(terrain[idx(x,y)])?0:INF
+  }
+  // Fast two-pass chamfer distance transform. This creates a smooth,
+  // naturally varying shallow-water shelf around every coastline.
+  for(let y=0;y<WORLD_H;y++)for(let x=0;x<WORLD_W;x++){
+    const i=idx(x,y);let d=shoreDistance[i];
+    if(x>0)d=Math.min(d,shoreDistance[idx(x-1,y)]+1);
+    if(y>0)d=Math.min(d,shoreDistance[idx(x,y-1)]+1);
+    if(x>0&&y>0)d=Math.min(d,shoreDistance[idx(x-1,y-1)]+diag);
+    if(x<WORLD_W-1&&y>0)d=Math.min(d,shoreDistance[idx(x+1,y-1)]+diag);
+    shoreDistance[i]=d
+  }
+  for(let y=WORLD_H-1;y>=0;y--)for(let x=WORLD_W-1;x>=0;x--){
+    const i=idx(x,y);let d=shoreDistance[i];
+    if(x<WORLD_W-1)d=Math.min(d,shoreDistance[idx(x+1,y)]+1);
+    if(y<WORLD_H-1)d=Math.min(d,shoreDistance[idx(x,y+1)]+1);
+    if(x<WORLD_W-1&&y<WORLD_H-1)d=Math.min(d,shoreDistance[idx(x+1,y+1)]+diag);
+    if(x>0&&y<WORLD_H-1)d=Math.min(d,shoreDistance[idx(x-1,y+1)]+diag);
+    shoreDistance[i]=d
+  }
+}
+function coastDistanceAt(x,y){return fieldSample(shoreDistance,x,y)}
+function normalizedShoreVector(x,y){
+  const v=shorelineVector(x,y,false),len=Math.hypot(v.x,v.y)||1;
+  return {x:v.x/len,y:v.y/len,count:v.count}
+}
 function paintedVisualSample(wx,wy,px,py){
   let h=fieldSample(height,wx,wy),m=fieldSample(moisture,wx,wy);
   const forest=typeWeight(wx,wy,T.FOREST),grass=typeWeight(wx,wy,T.GRASS),sand=typeWeight(wx,wy,T.SAND);
@@ -84,18 +113,21 @@ function paintedVisualSample(wx,wy,px,py){
   const landWeight=clamp(forest+grass+sand+mountain+snow+lava,0,1);
   const land=smoothstep(.10,.90,landWeight);
   const organic=(Math.sin(wx*.43+wy*.17+worldSeed*.013)+Math.sin(wx*.19-wy*.51+worldSeed*.021)+Math.cos(wx*.73+wy*.29))*0.0032;
-  h=clamp(h+organic,0,1);
-  m=clamp(m+forest*.20-grass*.025,0,1);
+  h=clamp(h+organic,0,1);m=clamp(m+forest*.20-grass*.025,0,1);
 
-  // Deep ocean remains blue everywhere. Height changes its depth subtly,
-  // but no longer creates giant turquoise underwater halos.
+  // Deep ocean foundation.
   const depthTone=clamp((h-.05)/.31,0,1);
-  let c=mixColor([7,55,91],[19,91,135],depthTone*.72);
+  let c=mixColor([7,53,88],[16,82,124],depthTone*.68);
 
-  // Turquoise exists ONLY where bilinear terrain weights are already
-  // transitioning into actual land: roughly a one-cell visual shelf.
-  const shoreWater=(1-land)*smoothstep(.025,.48,landWeight);
-  c=mixColor(c,[52,157,182],shoreWater*.62);
+  // Natural shallow-water shelf generated from actual distance to land.
+  // Noise gently changes shelf width so it does not form a perfect ring.
+  const coastDist=coastDistanceAt(wx,wy);
+  const shelfNoise=.5+.5*Math.sin(wx*.23+wy*.17+worldSeed*.011)*Math.cos(wx*.11-wy*.29);
+  const shelfWidth=4.2+shelfNoise*2.3;
+  const shelf=(1-land)*(1-smoothstep(1.0,shelfWidth,coastDist));
+  const inner=(1-land)*(1-smoothstep(.7,2.25,coastDist));
+  c=mixColor(c,[31,119,151],shelf*.72);
+  c=mixColor(c,[67,169,190],inner*.58);
 
   const sandC=mixColor([207,184,120],[238,219,164],clamp(.28+m*.12,0,1));
   const grassC=mixColor([91,151,75],[132,187,101],clamp(m*.52+.20,0,1));
@@ -111,11 +143,10 @@ function paintedVisualSample(wx,wy,px,py){
   c=mixColor(c,snowC,clamp(snow,0,1));
   c=mixColor(c,lavaC,clamp(lava,0,1));
 
-  const grain=(hash(px>>1,py>>1,worldSeed+444)-.5)*6.5;
-  const broad=(Math.sin(wx*.28+wy*.11)+Math.cos(wx*.15-wy*.23))*1.65;
+  const grain=(hash(px>>1,py>>1,worldSeed+444)-.5)*6.0;
+  const broad=(Math.sin(wx*.28+wy*.11)+Math.cos(wx*.15-wy*.23))*1.45;
   let [r,g,b]=c;
   r+=grain+broad;g+=grain*.70+broad*1.05;b+=grain*.45+broad*.34;
-
   return [clamp(r,0,255),clamp(g,0,255),clamp(b,0,255),land]
 }
 
@@ -196,6 +227,7 @@ function colorFor(t,x,y,i){
 function nearType(x,y,type){for(let yy=Math.max(0,y-1);yy<=Math.min(WORLD_H-1,y+1);yy++)for(let xx=Math.max(0,x-1);xx<=Math.min(WORLD_W-1,x+1);xx++)if(terrain[idx(xx,yy)]===type)return true;return false}
 function shorelineFactor(x,y){const t=terrain[idx(x,y)];if(t!==T.WATER&&t!==T.SAND)return 0;let land=0,total=0;for(let yy=-2;yy<=2;yy++)for(let xx=-2;xx<=2;xx++){const nx=x+xx,ny=y+yy;if(nx<0||ny<0||nx>=WORLD_W||ny>=WORLD_H)continue;total++;const nt=terrain[idx(nx,ny)];if(nt>=T.SAND)land++}return land/Math.max(1,total)}
 function rebuildTerrain(){
+  rebuildShoreDistance();
   const W=terrainCanvas.width,H=terrainCanvas.height,im=tctx.createImageData(W,H),d=im.data;
   for(let py=0;py<H;py++){
     const wy=(py+.5)/TEX-.5;
@@ -1182,17 +1214,16 @@ function drawCoastalBlend(){
   ctx.save();ctx.lineCap="round";
   for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y++){
     for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x++){
-      const i=idx(x,y),tt=terrain[i],shore=shorelineFactor(x,y);
-      if(!isWaterTile(tt)||shore<.12)continue;
-      const s=worldToScreen(x+.5,y+.5),dir=shorelineVector(x,y,false),surge=.5+.5*Math.sin(t*1.7+x*.46+y*.29),h=hash(x,y,worldSeed+530);
-      if(h>.30){
-        ctx.strokeStyle=`rgba(110,211,231,${.07+shore*.10})`;ctx.lineWidth=Math.max(1,z*.045);
-        ctx.beginPath();ctx.arc(s.x+dir.x*z*(.12+.09*surge),s.y+dir.y*z*(.12+.09*surge),z*(.13+shore*.11),Math.PI*.08,Math.PI*1.18);ctx.stroke()
-      }
-      if(shore>.18&&h>.56){
-        ctx.strokeStyle=`rgba(249,253,251,${.08+shore*.13})`;ctx.lineWidth=Math.max(1,z*.05);
-        ctx.beginPath();ctx.arc(s.x+dir.x*z*(.21+.11*surge),s.y+dir.y*z*(.21+.11*surge),z*(.08+shore*.09),Math.PI*.10,Math.PI*1.16);ctx.stroke()
-      }
+      const i=idx(x,y),tt=terrain[i];
+      if(!isWaterTile(tt)||shoreDistance[i]>1.5)continue;
+      const normal=normalizedShoreVector(x,y);if(!normal.count)continue;
+      const nx=normal.x,ny=normal.y,tx=-ny,ty=nx;
+      const h=hash(x,y,worldSeed+530);if(h<.45)continue;
+      const pulse=.5+.5*Math.sin(t*1.15+x*.18+y*.11+h*2.0);
+      const s=worldToScreen(x+.5,y+.5),push=z*(.08+.11*pulse),cx=s.x+nx*push,cy=s.y+ny*push,len=z*(.18+.14*h);
+      ctx.strokeStyle=`rgba(244,252,250,${.035+.065*pulse})`;
+      ctx.lineWidth=Math.max(1,z*.032);
+      ctx.beginPath();ctx.moveTo(cx-tx*len,cy-ty*len);ctx.quadraticCurveTo(cx+nx*z*.035,cy+ny*z*.035,cx+tx*len,cy+ty*len);ctx.stroke()
     }
   }
   ctx.restore()
@@ -1201,36 +1232,53 @@ function drawWater(){
   const b=visibleBounds(5),z=cameraScale(),t=visualTime;
   ctx.save();ctx.lineCap="round";
 
-  const bandGap=6.8,travel=(t*2.15)%bandGap,baseRow=Math.floor((b.t-12)/bandGap)*bandGap;
-  for(let wy=baseRow;wy<b.b+14;wy+=bandGap){
-    const waveY=wy+travel;
-    for(let wx=Math.floor((b.l-14)/10)*10;wx<b.r+14;wx+=10){
-      const cx=wx+Math.sin(t*.62+wy*.18)*2.45,cy=waveY+Math.sin(t*.46+wx*.11)*.48;
-      const tx=clamp(Math.round(cx),0,WORLD_W-1),ty=clamp(Math.round(cy),0,WORLD_H-1);
-      if(!isWaterTile(terrain[idx(tx,ty)]))continue;
-      const s=worldToScreen(cx,cy),curl=Math.sin(t*2.45+wx*.25+wy*.31),len=z*(2.0+hash(tx,ty,worldSeed+710)*1.15);
-      ctx.strokeStyle="rgba(226,245,251,.13)";ctx.lineWidth=Math.max(1,z*.067);
-      ctx.beginPath();ctx.moveTo(s.x-len,s.y+curl*z*.13);ctx.bezierCurveTo(s.x-len*.38,s.y-curl*z*.29,s.x+len*.36,s.y+curl*z*.24,s.x+len,s.y-curl*z*.10);ctx.stroke();
-      if(hash(tx,ty,worldSeed+711)>.61){ctx.strokeStyle="rgba(175,222,238,.075)";ctx.lineWidth=Math.max(1,z*.045);ctx.beginPath();ctx.moveTo(s.x-len*.48,s.y+z*.33-curl*z*.06);ctx.quadraticCurveTo(s.x,s.y+z*.17+curl*z*.09,s.x+len*.50,s.y+z*.32-curl*z*.04);ctx.stroke()}
-    }
-  }
-
+  // No repeated wave stripes across the open ocean.
+  // Visible waves are breaking surf and backwash oriented to the coastline.
   const step=zoom<3?2:1;
   for(let y=Math.max(0,Math.floor(b.t));y<Math.min(WORLD_H,Math.ceil(b.b));y+=step){
     for(let x=Math.max(0,Math.floor(b.l));x<Math.min(WORLD_W,Math.ceil(b.r));x+=step){
       const i=idx(x,y);if(!isWaterTile(terrain[i]))continue;
-      const shore=shorelineFactor(x,y),dir=shorelineVector(x,y,false),h=hash(x,y,worldSeed+333),wave=Math.sin(t*3.0+x*.88+y*.34),wave2=Math.cos(t*2.4-x*.31+y*.59),tide=.5+.5*Math.sin(t*1.08+x*.11+y*.08);
-      const s=worldToScreen(x+.5+Math.sin(t*.70+x*.07-y*.03)*.07,y+.5+Math.cos(t*.58+x*.04)*.035);
+      const dist=shoreDistance[i];
+      if(dist>2.2)continue;
 
-      if(shore>.13&&h>.18){
-        const push=.16+.15*tide;
-        ctx.strokeStyle=`rgba(252,254,252,${.10+shore*.20})`;ctx.lineWidth=Math.max(1,z*.065);
-        ctx.beginPath();ctx.arc(s.x+dir.x*z*push,s.y+dir.y*z*push,z*(.11+shore*.13),Math.PI*.06,Math.PI*1.15);ctx.stroke()
-      }
-      if(h>.61){
-        const rippleLen=z*(.28+h*.27);
-        ctx.strokeStyle="rgba(231,247,252,.095)";ctx.lineWidth=Math.max(1,z*.040);
-        ctx.beginPath();ctx.moveTo(s.x-rippleLen+wave*z*.10,s.y+wave2*z*.06);ctx.quadraticCurveTo(s.x,s.y-wave*z*.11,s.x+rippleLen+wave*z*.10,s.y+wave2*z*.03);ctx.stroke()
+      const normal=normalizedShoreVector(x,y);
+      if(!normal.count)continue;
+      const nx=normal.x,ny=normal.y,tx=-ny,ty=nx;
+      const h=hash(x,y,worldSeed+333);
+      if(h<.22)continue;
+
+      // Nearby coastline cells share similar timing, while a little noise
+      // keeps the surf from becoming a perfect continuous ring.
+      let phase=(t*.58+x*.075+y*.052+h*.20)%1;
+      if(phase<0)phase+=1;
+      const approach=smoothstep(.05,.76,phase);
+      const crash=1-smoothstep(.66,1.0,phase);
+      const alpha=Math.sin(Math.PI*phase)*(.10+(.30*crash));
+
+      const base=worldToScreen(x+.5,y+.5);
+      // Move the crest from offshore toward the land as the phase advances.
+      const normalOffset=z*(-.30+approach*.48);
+      const cx=base.x+nx*normalOffset,cy=base.y+ny*normalOffset;
+      const len=z*(.34+.26*h+.16*(1-dist/2.2));
+      const bow=z*(.055+.055*Math.sin(t*1.8+x*.31+y*.21));
+
+      ctx.strokeStyle=`rgba(249,253,251,${clamp(alpha,0,.34)})`;
+      ctx.lineWidth=Math.max(1,z*(.055+.025*crash));
+      ctx.beginPath();
+      ctx.moveTo(cx-tx*len,cy-ty*len);
+      ctx.quadraticCurveTo(cx+nx*bow,cy+ny*bow,cx+tx*len,cy+ty*len);
+      ctx.stroke();
+
+      // A softer second line appears behind the breaking crest as backwash.
+      if(phase>.45&&phase<.92&&h>.52){
+        const back=z*(-.48+approach*.30);
+        const bx=base.x+nx*back,by=base.y+ny*back;
+        ctx.strokeStyle=`rgba(170,224,239,${.035+alpha*.25})`;
+        ctx.lineWidth=Math.max(1,z*.035);
+        ctx.beginPath();
+        ctx.moveTo(bx-tx*len*.68,by-ty*len*.68);
+        ctx.quadraticCurveTo(bx+nx*bow*.6,by+ny*bow*.6,bx+tx*len*.68,by+ty*len*.68);
+        ctx.stroke()
       }
     }
   }
@@ -1786,7 +1834,7 @@ function settingsHtml(){
   <div class="menuSection">World management</div><button class="bigAction" data-action="center-world" type="button">⌾ Center on First Hearth</button><button class="bigAction" data-action="open-world-creator" type="button">🌍 Open World Creator</button><button class="bigAction danger" data-action="open-world-reset" type="button">↺ Reset Current World</button>`
 }
 function updatesHtml(){
-  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V8.2 · Natural Effects</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
+  return `<div class="menuHero"><div class="eyebrow">Tiny World</div><h3>V8.3 · Natural Coastline Water</h3><p>You can now shape how a world is generated before civilization begins.</p></div>
   <div class="updateItem"><b>V8.2 — Natural Effects</b><small>Current</small><p>Lightning is now a real branching strike with a brief flash instead of a grid of hazard markers. Fire uses irregular animated flame clusters and embers. The broad turquoise ocean halo was removed at the terrain-color level, leaving only a narrow coastal shallows transition and moving foam.</p></div><div class="updateItem"><b>V8.1 — Living Ocean</b><small>Previous</small><p>Ocean animation moved to real elapsed frame time with traveling wave bands and tidal surf.</p></div><div class="updateItem"><b>V8 — Premium Painted World</b><small>Previous</small><p>The surface renderer moved to continuous height/moisture sampling with smoothed terrain, mixed forests and upgraded miniature people and wildlife.</p></div><div class="updateItem"><b>V7.2 — Painted World Pass</b><small>Previous</small><p>Added larger painterly land dabs, softer shore blending, stronger surf and more organic forest shapes.</p></div><div class="updateItem"><b>V7.1 — Brushed World Pass</b><small>Previous</small><p>Terrain leans harder into a brushed look with stronger painterly dabs, forests render more organically, and water has much more visible motion and shoreline surf.</p></div><div class="updateItem"><b>V7 — Premium Art Pass</b><small>Previous</small><p>The world now uses a richer painterly land overlay, softer coastal blending, more alive shore water, refined huts and farms, and upgraded tiny sprites so citizens and animals feel like miniature living beings in a premium-looking world.</p></div><div class="updateItem"><b>V6.6 — Organic Terrain + Sprite Overhaul</b><small>Previous</small><p>Coastlines became softer, shoreline water gained a light tide effect, wave motion became more visible, and both citizens and animals received upgraded tiny vector sprites.</p></div><div class="updateItem"><b>V6.5 — Grand Graphics Overhaul</b><small>Previous</small><p>The world surface was rebuilt with sharper texturing, richer biome color, animated wave motion, improved shoreline foam, bush-like food clusters, cleaner low-zoom forest rendering and stronger visual grounding between the land and the citizens.</p></div><div class="updateItem"><b>V6 — Living Civilization</b><small>Previous</small><p>Citizens age, learn, build skills, form households, create families, experience grief and leave a lineage behind.</p></div><div class="updateItem"><b>V5.4 — World Scale</b><small>Previous</small><p>Dynamic 100×100 through 500×500 world sizes.</p></div><div class="updateItem"><b>V5.3 — Family & Marriage</b><small>Previous</small><p>Dating, emotional bonds, marriage, shared surnames, breakups and child surname inheritance.</p></div><div class="updateItem"><b>V5.2 — Responsive World</b><small>Previous</small><p>Responsive landscape catalogs, smaller wording and procedural unique names.</p></div><div class="updateItem"><b>V5.1 — Living World</b><small>Previous</small><p>Compact HUD, collapsible Atlas, hide-UI mode, personality traits, long-term goals, danger awareness, social needs and relationships.</p></div><div class="updateItem"><b>V5 — Visual Overhaul</b><small>Previous</small><p>Premium UI, atlas, richer terrain, water, forests, mountains, buildings, villagers and atmosphere.</p></div>
   <div class="updateItem"><b>V4.1 — Underground</b><small>Previous</small><p>Surface/Underground toggle, caves, deep stone, underground lakes, magma, iron/gold/coal/crystal veins, mine entrances, tunneling miners and layer-aware god powers.</p></div>
   <div class="updateItem"><b>V4 — World Control</b><small>Previous</small><p>World, God Powers and Resources tabs; full people/village/history/settings panels; biome painting; fire and lava; iron and gold; wildlife; direct people spawning; persistent visual settings.</p></div>

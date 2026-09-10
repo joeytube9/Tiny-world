@@ -1,25 +1,19 @@
-Tiny World V8.2 — NATURAL EFFECTS
+Tiny World V8.3 — NATURAL COASTLINE WATER
 
-LIGHTNING
-- Lightning no longer paints a field of orange triangular markers.
-- The impact is now limited to actual land.
-- Each use creates a branching animated lightning bolt from the sky.
-- A brief pale flash and small impact sparks sell the strike.
-- Only a few impact cells are scorched instead of an entire visible grid.
+SHALLOW WATER
+- Added a real coastline-distance field.
+- Water color now changes naturally based on distance from land.
+- Turquoise shallow water forms a varying shelf around islands and continents.
+- The shelf width has subtle world-noise variation so it does not look like a perfect glow ring.
+- Deep ocean remains dark blue away from land.
+- The distance field automatically rebuilds after terrain changes, so custom World Creator / God Power land still gets correct shallow water.
 
-FIRE
-- Fire no longer displays an identical triangle on every burning tile.
-- Burning ground now produces sparse, offset animated flame clusters.
-- Flames have outer red/orange shapes, hot inner cores and rising embers.
-- Initial ignition creates a short burst effect.
-- Fire placement itself is patchier and more organic.
+WAVES
+- Removed the repeated open-ocean horizontal/vertical wave bands.
+- Visible white waves now appear primarily near shore.
+- Each crest is oriented parallel to the local coastline.
+- Crests animate from offshore toward the land and then fade after breaking.
+- Added a softer backwash line behind some breakers.
+- Surf continues using real frame time and remains independent from simulation speed.
 
-OCEAN CLEANUP
-- Removed the height-driven turquoise glow that could extend far away from islands.
-- Deep water remains deep blue even over high underwater height values.
-- Turquoise shallows are now based on actual interpolated proximity to land.
-- Shore overlay no longer paints large translucent aqua ellipses.
-- Coastal color is now a tight shelf plus moving line/foam detail.
-- The old large atmospheric glow circle was removed as well.
-
-All V8 continuous terrain rendering, real-time ocean motion, world creation, God Powers, Living Civilization, families and underground systems remain.
+All V8.2 natural lightning/fire effects and V8 painterly terrain systems remain.
