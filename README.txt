@@ -1,70 +1,57 @@
-Tiny World V9 — CIVILIZATIONS & KINGDOMS
+Tiny World V10.0 — CULTURE, FAITH & ECONOMY
 
-V9 is the largest simulation expansion since Living Civilization.
+V10.0 is the first V10 rollout build.
 
-MULTIPLE SETTLEMENTS
-- Growing settlements can send actual citizens and families away to found new communities.
-- Founders keep their names, family ties, memories, skills and citizenship history.
-- Every settlement has its own food, wood, stone, iron, gold, coal, buildings and discoveries.
-- Secondary settlements use the same jobs/building/economy systems instead of being decorative counters.
-- Settlement expansion scales with selected world size.
+CULTURE
+- Every settlement belongs to a real culture.
+- Cultures have values, customs, festivals, prestige and historical heroes.
+- Daughter settlements inherit culture and can diverge after enough time/distance/rivalry.
+- Citizens personally carry culture, so migrants and refugees preserve identity.
+- Shared culture and shared values now affect diplomacy.
 
-LEADERS
-- Every settlement selects a leader from actual adult citizens.
-- Leadership favors reputation, social ability, bravery, education, age and wealth.
-- Leaders can die and be replaced.
-- Becoming leader is stored as personal memory and world history.
+FAITH
+- Citizens have individual belief percentages and stances:
+  Skeptic, Doubtful, Questioning, Believer, Devout.
+- God Powers feed a divine-history system.
+- Rain/healing/blessing/growth can build a merciful or protective interpretation.
+- Fire/lightning/lava/drought can create fear and a wrathful interpretation.
+- Civilizations independently perceive the Creator.
+- Organized religions can emerge.
+- Actual citizens become prophets and priests.
+- Religions have doctrine, themes, prestige and followers.
+- Trade can spread religion.
+- Distant hostile branches can schism.
+- Major divine moments can become holy sites.
+- Shrines and temples are built by religious settlements.
 
-TERRITORY
-- Settlements claim a growing territory radius based on population and buildings.
-- Territories are visible on the surface map.
-- Settlement flags/names are visible in-world.
-- Border pressure can damage diplomacy.
+ECONOMY
+- Settlement markets calculate scarcity-based prices.
+- Work pays personal wealth.
+- Citizens develop economic/social classes.
+- Markets can be constructed.
+- Trade-connected mature settlements can move from Barter to Coinage.
+- Each coinage economy generates its own currency name.
+- Actual citizens can become merchants.
+- Merchants physically travel land-connected trade routes and earn profit.
 
-KINGDOMS
-- Strongly allied independent settlements can unite into kingdoms.
-- Kingdoms have a capital, ruler, member settlements, treasury, laws and war records.
-- Existing kingdoms can absorb very close allies.
-- Defeated settlements can sometimes enter the winner's kingdom.
+ATLAS
+- Political mode.
+- Culture mode.
+- Faith mode.
+- Economy mode.
 
-DIPLOMACY
-- Every settlement pair has a live relationship score.
-- Relations can be Allied, Friendly, Cordial, Neutral, Tense or Hostile.
-- Shared ancestry, kingdoms and trade improve relations.
-- Crowded borders and militaristic identity can worsen relations.
+CITIZENS
+- Inspector now shows culture, faith, belief, religious role, class and economic role.
+- Children inherit cultural/religious influence and blended belief.
 
-TRADE
-- Friendly settlements within range can establish trade routes.
-- Routes are physically visible on the world and Atlas.
-- Food and wood can move from resource-rich settlements to poorer partners.
-- Trade gradually improves diplomatic relations.
+NEW BUILDINGS
+- Market
+- Shrine
+- Temple
 
-WAR
-- Deep hostility can cause real wars.
-- Armies are selected from actual adult citizens.
-- Military strength depends on population, courage and iron.
-- Battles happen through time.
-- Named citizens can die in battles.
-- Wars track casualties, battles, start/end days and winners.
-- Victorious kingdoms can sometimes absorb defeated independent settlements.
+V10.0 is the foundation. Future V10.x passes can deepen class politics,
+ownership, manufactured goods, law/crime, cultural architecture,
+religious denominations and historical interpretation.
 
-REFUGEES
-- War and famine can push real families to flee.
-- Refugees seek friendly safer settlements.
-- Their settlement changes, but names, ancestry and memories remain.
-- Citizenship migration history appears in the citizen inspector.
-
-POLITICAL WORLD
-- Trade routes, settlement markers, territory circles and active war fronts render on the map.
-- Atlas displays settlement colors and trade links.
-- New Civilizations page lists every settlement and kingdom.
-- Settlement page shows government, leader, prosperity, military and relations.
-- War tab is now a functional War Room with active conflicts, diplomacy and war history.
-- World overview tracks settlements, kingdoms, active wars and trade routes.
-
-V8.3 painterly terrain, natural shoreline water, V8.2 effects, V6 life simulation,
-marriage/families, underground mining, God Powers and all world-size options remain.
-
-DEPLOY
-Replace the GitHub repository files with this flat build and commit.
-Cloudflare should redeploy automatically.
+All V9 politics/kingdoms/wars, V8 painterly graphics, V6 living citizens,
+families/marriage, underground systems and God Powers remain.

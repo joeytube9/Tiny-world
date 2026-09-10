@@ -1,7 +1,7 @@
 {
   "name": "Tiny World",
   "short_name": "Tiny World",
-  "description": "Tiny World V9: multiple settlements, real citizen leaders, territories, diplomacy, trade routes, kingdoms, armies, wars, refugees, migration and political world history.",
+  "description": "Tiny World V10.0 adds emergent cultures, personal belief, religions, prophets, holy sites, markets, scarcity pricing, merchants, social classes, currencies and new Atlas modes.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

@@ -861,3 +861,15 @@ button.active{
 @media(orientation:landscape) and (max-height:560px){
   .civCard{padding:6px}.warSides{margin:5px 0}.warSides>div:not(.versus){padding:5px}
 }
+
+/* V10 — Culture, Faith & Economy */
+.atlasModes{display:grid;grid-template-columns:repeat(4,1fr);gap:3px;margin:0 0 5px}
+.atlasModes button{min-width:0;padding:4px 1px;border-radius:6px;font-size:6px;line-height:1;color:#91a5aa;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.055)}
+.atlasModes button.active{color:#edf4ef;background:rgba(113,171,96,.20);border-color:rgba(159,211,142,.25)}
+.cultureCard,.faithCard,.economyCard{padding:9px;margin-bottom:7px;border-radius:13px;background:linear-gradient(180deg,rgba(255,255,255,.048),rgba(255,255,255,.024));border:1px solid rgba(255,255,255,.07)}
+.cultureHead{display:flex;align-items:center;gap:7px;margin-bottom:6px}.cultureHead>div{min-width:0;flex:1}.cultureHead b{font-size:10px}.cultureHead small{display:block;font-size:7px;color:#91a6ab;margin-top:2px}
+.cultureSwatch{width:10px;height:32px;border-radius:6px;flex:0 0 auto}.faithSwatch{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:11px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.18)}
+.tagRow{display:flex;gap:4px;flex-wrap:wrap;margin:4px 0 7px}.tagRow span{font-size:7px;padding:3px 5px;border-radius:999px;background:rgba(133,176,117,.10);border:1px solid rgba(158,205,143,.10);color:#b8ccb7}
+.faithCard p{font-size:7.5px;color:#b3c0c1;line-height:1.45;margin:4px 0 7px}
+.priceGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin:6px 0}.priceGrid span{padding:5px 3px;border-radius:8px;text-align:center;font-size:7px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.05)}
+@media(orientation:landscape) and (max-height:560px){.cultureCard,.faithCard,.economyCard{padding:6px;margin-bottom:5px}.atlasModes button{font-size:5.5px;padding:3px 1px}.priceGrid span{padding:4px 2px}}

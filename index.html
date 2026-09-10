@@ -10,7 +10,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="styles.css">
-<title>Tiny World V9</title>
+<title>Tiny World V10</title>
 </head>
 <body>
 <div id="app">
@@ -41,7 +41,13 @@
       <span>🗺️</span><b>Atlas</b><small>⌄</small>
     </button>
     <div class="minimapContent">
-      <div class="minimapHead"><b>World Atlas</b><small id="miniMapMode">Surface</small></div>
+      <div class="minimapHead"><b>World Atlas</b><small id="miniMapMode">Political</small></div>
+      <div id="atlasModes" class="atlasModes">
+        <button data-atlas-mode="political" class="active" type="button">Political</button>
+        <button data-atlas-mode="culture" type="button">Culture</button>
+        <button data-atlas-mode="faith" type="button">Faith</button>
+        <button data-atlas-mode="economy" type="button">Economy</button>
+      </div>
       <canvas id="miniMap" width="168" height="116"></canvas>
     </div>
   </section>
@@ -100,7 +106,7 @@
     <div class="logo">
       <div class="island">🌍</div>
       <h1>Tiny World</h1>
-      <p>V9 · Civilizations & Kingdoms</p>
+      <p>V10.0 · Culture, Faith & Economy</p>
     </div>
   </div>
 </div>
