@@ -1,0 +1,22 @@
+{
+  "name": "worldforge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WORLDFORGE — Shape worlds. Stir storms. Seed life. A 3D planet, weather, erosion, life and orbit sandbox for iPhone Safari.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "node scripts/make-icons.mjs && vite build && node scripts/build-sw.mjs",
+    "preview": "vite preview --host --port 4173",
+    "test": "node --test tests/*.test.js",
+    "e2e": "node scripts/e2e.mjs",
+    "zip": "node scripts/make-zips.mjs"
+  },
+  "dependencies": {
+    "three": "0.169.0"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1",
+    "vite": "5.4.21"
+  }
+}

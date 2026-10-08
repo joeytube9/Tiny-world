@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#05070d" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="WORLDFORGE" />
+    <meta name="description" content="WORLDFORGE — Shape worlds. Stir storms. Seed life. A 3D planet, weather, erosion, life and orbit sandbox." />
+    <title>WORLDFORGE</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+  </head>
+  <body>
+    <canvas id="scene" aria-label="WORLDFORGE 3D view"></canvas>
+    <div id="ui"></div>
+    <div id="loading">
+      <div class="load-orb"></div>
+      <div class="load-title">WORLDFORGE</div>
+      <div class="load-sub">Shape worlds. Stir storms. Seed life.</div>
+      <noscript><p>JavaScript and WebGL are required.</p></noscript>
+    </div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
