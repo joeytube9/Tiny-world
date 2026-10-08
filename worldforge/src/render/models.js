@@ -49,14 +49,14 @@ function merge(parts) {
   return g;
 }
 
-const sph = (w = 10, h = 8) => new THREE.SphereGeometry(1, w, h);
+const sph = (w = 8, h = 6) => new THREE.SphereGeometry(1, w, h);
 const cyl = (rt = 1, rb = 1, s = 8) => new THREE.CylinderGeometry(rt, rb, 1, s, 1);
 const cone = (s = 8) => new THREE.ConeGeometry(1, 1, s, 1);
 const box = () => new THREE.BoxGeometry(1, 1, 1);
 
 function quadruped({ body, belly, leg, head, len = 1, legH = 0.55, extra = [] }) {
   const P = [];
-  P.push(part(sph(12, 10), { color: body, pos: [0, legH + 0.18, 0], scale: [0.27, 0.3, 0.55 * len], shade: 0.4 }));
+  P.push(part(sph(10, 8), { color: body, pos: [0, legH + 0.18, 0], scale: [0.27, 0.3, 0.55 * len], shade: 0.4 }));
   P.push(part(sph(10, 8), { color: belly, pos: [0, legH + 0.08, 0.02], scale: [0.22, 0.18, 0.42 * len] }));
   const lz = 0.32 * len;
   const legs = [[0.13, lz, 0], [-0.13, lz, Math.PI], [0.13, -lz, Math.PI], [-0.13, -lz, 0]];
@@ -190,17 +190,17 @@ export function buildPlantGeometry(key) {
         const r = 0.05 + (k % 2) * 0.08;
         const h = 0.25 + (k % 3) * 0.08;
         P.push(part(cyl(0.01, 0.012, 4), { color: [0.25, 0.5, 0.18], pos: [Math.cos(a) * r, h / 2, Math.sin(a) * r], scale: [1, h, 1], anim: sway(1) }));
-        P.push(part(sph(6, 4), { color: petals[k % 4], pos: [Math.cos(a) * r, h + 0.02, Math.sin(a) * r], scale: [0.06, 0.035, 0.06], anim: sway(1) }));
-        P.push(part(sph(4, 3), { color: [0.98, 0.8, 0.1], pos: [Math.cos(a) * r, h + 0.045, Math.sin(a) * r], scale: [0.02, 0.015, 0.02], anim: sway(1) }));
+        P.push(part(sph(5, 3), { color: petals[k % 4], pos: [Math.cos(a) * r, h + 0.02, Math.sin(a) * r], scale: [0.06, 0.035, 0.06], anim: sway(1) }));
+        
       }
-      P.push(part(sph(6, 4), { color: [0.3, 0.55, 0.2], pos: [0, 0.04, 0], scale: [0.16, 0.05, 0.16] }));
+      P.push(part(sph(6, 3), { color: [0.3, 0.55, 0.2], pos: [0, 0.04, 0], scale: [0.16, 0.05, 0.16] }));
       break;
     }
     case 'shrubs': {
       const c = [[0.42, 0.48, 0.2], [0.36, 0.42, 0.17], [0.48, 0.52, 0.26]];
       P.push(part(cyl(0.025, 0.035, 5), { color: [0.35, 0.25, 0.15], pos: [0, 0.1, 0], scale: [1, 0.2, 1] }));
       const pts = [[0, 0.28, 0, 0.2], [0.14, 0.22, 0.05, 0.15], [-0.12, 0.2, 0.08, 0.14], [0.02, 0.2, -0.14, 0.15], [-0.05, 0.38, -0.03, 0.12]];
-      pts.forEach(([x, y, z, r], k) => P.push(part(sph(8, 6), { color: c[k % 3], pos: [x, y, z], scale: [r, r * 0.85, r], shade: 0.5, anim: sway(0.6) })));
+      pts.forEach(([x, y, z, r], k) => P.push(part(sph(6, 4), { color: c[k % 3], pos: [x, y, z], scale: [r, r * 0.85, r], shade: 0.5, anim: sway(0.6) })));
       break;
     }
     case 'conifer': {
@@ -216,7 +216,7 @@ export function buildPlantGeometry(key) {
       P.push(part(cyl(0.02, 0.035, 5), { color: bark, pos: [-0.1, 0.62, 0.05], rot: [0.3, 0, 0.6], scale: [1, 0.3, 1], anim: sway(0.4) }));
       const greens = [[0.2, 0.5, 0.15], [0.16, 0.42, 0.12], [0.26, 0.56, 0.18], [0.22, 0.46, 0.14]];
       const blobs = [[0, 0.86, 0, 0.3], [0.22, 0.76, 0.06, 0.22], [-0.2, 0.78, 0.1, 0.22], [0.05, 0.74, -0.2, 0.22], [-0.04, 1.02, -0.04, 0.2], [0.14, 0.95, 0.15, 0.18]];
-      blobs.forEach(([x, y, z, r], k) => P.push(part(sph(9, 7), { color: greens[k % 4], pos: [x, y, z], scale: [r, r * 0.9, r], shade: 0.6, anim: sway(0.5) })));
+      blobs.forEach(([x, y, z, r], k) => P.push(part(sph(7, 5), { color: greens[k % 4], pos: [x, y, z], scale: [r, r * 0.9, r], shade: 0.6, anim: sway(0.5) })));
       break;
     }
     case 'fungi': {
@@ -224,8 +224,8 @@ export function buildPlantGeometry(key) {
       const ms = [[0, 0, 0, 1], [0.12, 0, 0.06, 0.7], [-0.08, 0, 0.1, 0.55]];
       ms.forEach(([x, , z, s], k) => {
         P.push(part(cyl(0.025, 0.035, 6), { color: [0.95, 0.93, 0.88], pos: [x, 0.08 * s, z], scale: [s, 0.16 * s, s] }));
-        P.push(part(new THREE.SphereGeometry(1, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), { color: caps[k], pos: [x, 0.15 * s, z], scale: [0.09 * s, 0.07 * s, 0.09 * s] }));
-        P.push(part(sph(4, 3), { color: [0.98, 0.98, 0.95], pos: [x + 0.03 * s, 0.205 * s, z], scale: [0.015 * s, 0.01 * s, 0.015 * s] }));
+        P.push(part(new THREE.SphereGeometry(1, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2), { color: caps[k], pos: [x, 0.15 * s, z], scale: [0.09 * s, 0.07 * s, 0.09 * s] }));
+        P.push(part(sph(4, 2), { color: [0.98, 0.98, 0.95], pos: [x + 0.03 * s, 0.205 * s, z], scale: [0.015 * s, 0.01 * s, 0.015 * s] }));
       });
       break;
     }

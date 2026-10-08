@@ -119,7 +119,7 @@ export function materialsPanel(app) {
     { id: 'paint', label: 'Paint', icon: '🖌️' }, { id: 'addmat', label: 'Add', icon: '⬇️' }, { id: 'remove', label: 'Remove', icon: '⛏️' },
   ];
   const toolChips = chips(tools, { value: app.tool.id, onpick: (id) => app.setTool(id) });
-  const palette = MATERIALS.filter((m) => m.key !== 'atmos' && m.key !== 'envelope').map((m) => ({ id: m.key, label: m.name, icon: h('span', { class: 'swatch', style: { background: `rgb(${m.color.map((c) => Math.round(c * 255)).join(',')})` } }), title: m.desc }));
+  const palette = MATERIALS.map((m) => ({ id: m.key, label: m.name, icon: h('span', { class: 'swatch', style: { background: `rgb(${m.color.map((c) => Math.round(c * 255)).join(',')})` } }), title: m.desc }));
   const pal = chips(palette, { value: app.tool.material, onpick: (k) => { app.tool.material = k; if (!['paint', 'addmat', 'raise'].includes(app.tool.id)) app.setTool('paint'); app.ui.updateMode(); }, cls: 'palette' });
   const matDesc = h('p', { class: 'hint' });
   el.appendChild(section('Sculpt & paint (brush)', toolChips, brushControls(app), toolHint('Raise adds the selected material (inventory grows), Lower/Remove take material out, Smooth moves it (conserved). Paint replaces the surface skin. Add pours loose material that falls and deposits.')));
@@ -467,9 +467,12 @@ export function goalsCard(app) {
       el.innerHTML = '';
       el.style.display = app.world.mode === 'terraform' ? '' : 'none';
       if (app.world.mode !== 'terraform') return;
-      const head = h('button', { class: 'goals-head', onclick: () => el.classList.toggle('collapsed') }, '🎯 Terraforming goals');
+      if (this._init === undefined) { this._init = true; if (window.innerWidth < 600) el.classList.add('collapsed'); }
+      const done = GOALS.filter((g) => app.world.goals[g.id].done).length;
+      const head = h('button', { class: 'goals-head', onclick: () => el.classList.toggle('collapsed') }, `🎯 Goals ${done}/${GOALS.length}`);
       el.appendChild(head);
       const list = h('div', { class: 'goals-list' });
+      if (app.world.unlocks.length) list.appendChild(h('div', { class: 'unlocks' }, '🏅 ' + app.world.unlocks.join(' · ')));
       for (const g of GOALS) {
         const st = app.world.goals[g.id];
         list.appendChild(h('div', { class: 'goal' + (st.done ? ' done' : '') }, h('div', { class: 'g-t' }, (st.done ? '✅ ' : '⬜ ') + g.name), h('div', { class: 'meter' }, h('div', { style: { width: (st.progress * 100).toFixed(0) + '%' } })), h('small', {}, st.done ? 'Unlocked: ' + g.reward : g.desc)));

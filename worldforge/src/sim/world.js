@@ -369,12 +369,15 @@ export class World {
         sculpt(b, tool.id === 'remove' ? 'lower' : tool.id, hit.dir, size, strength * (tool.id === 'remove' ? 0.6 : 1), dt, tool.material);
         return { ok: true };
       case 'paint':
+        if (tool.material === 'atmos' || tool.material === 'envelope') return this.addGas(b, tool, dt);
         if (tool.material === 'water' || tool.material === 'lava' || tool.material === 'ice') {
           pour(b, tool.material, hit.dir, size, strength * 2.5 * (b.surface.Rs / 10) ** 2, dt, this.time.surface);
         } else sculpt(b, 'paint', hit.dir, size, strength, dt, tool.material);
         return { ok: true };
       case 'addmat':
-        pour(b, tool.material, hit.dir, size, strength * 1.2 * (b.surface.Rs / 10) ** 2, dt, this.time.surface);
+        if (tool.material === 'atmos' || tool.material === 'envelope') return this.addGas(b, tool, dt);
+        if (tool.material === 'water' || tool.material === 'lava' || tool.material === 'ice') pour(b, tool.material, hit.dir, size, strength * 2.5 * (b.surface.Rs / 10) ** 2, dt, this.time.surface);
+        else pour(b, tool.material, hit.dir, size, strength * 1.2 * (b.surface.Rs / 10) ** 2, dt, this.time.surface);
         return { ok: true };
       case 'pour':
         pour(b, 'water', hit.dir, size, strength * 4 * (b.surface.Rs / 10) ** 2, dt, this.time.surface);
@@ -398,6 +401,20 @@ export class World {
     return { ok: false };
   }
 
+  // Atmospheric gas raises the atmosphere inventory (bar); envelope gas only builds
+  // an envelope on gas giants — on rocky worlds it becomes ordinary atmosphere.
+  addGas(b, tool, dt) {
+    const amt = tool.strength * 0.08 * dt * Math.max(0.2, b.atmosphere * 0.5 + 0.2);
+    if (tool.material === 'envelope' && b.type === 'gas') {
+      b.gas.envelope += tool.strength * dt * b.gas.envelope * 0.01;
+      b.updateCaches();
+      return { ok: true, msg: 'Envelope gas thickens the gas giant (radius and mass grow).' };
+    }
+    b.atmosphere = Math.min(200, b.atmosphere + amt);
+    b.updateCaches();
+    return { ok: true, msg: tool.material === 'envelope' ? 'A rocky world cannot hold an envelope: the gas joins its atmosphere instead.' : `Atmosphere now ${b.atmosphere.toFixed(3)} bar.` };
+  }
+
   removeTopLayers(b, dir, size, strength, dt) {
     const s = b.surface;
     const { cells, wts } = brushCells(s, dir, size);
@@ -415,6 +432,7 @@ export class World {
 
   applyToNonTerrestrial(b, tool, dt) {
     const vol = tool.strength * 3 * dt;
+    if ((tool.id === 'addmat' || tool.id === 'paint') && (tool.material === 'atmos' || tool.material === 'envelope') && b.type === 'gas') return this.addGas(b, tool, dt);
     if (tool.id === 'pour' || tool.id === 'addmat' || tool.id === 'paint') {
       if (b.type === 'gas') {
         const key = tool.id === 'pour' ? 'water' : tool.material;
@@ -469,6 +487,7 @@ export class World {
     if (tool.id === 'animal') {
       const r = dropAnimals(b, tool.species, hit.dir, tool.group || 1, this.rng, this.settings, this.settings.experimentalOverride);
       if (r.placed > 0) b.logEvent(this.time.surface, `${r.placed} ${SPECIES[tool.species].name}${r.placed > 1 ? 's' : ''} released.`);
+      if (r.aggregated > 0) return { ok: true, msg: r.reason };
       return { ok: r.placed > 0, msg: r.placed > 0 ? `Released ${r.placed} ${SPECIES[tool.species].name}. ${r.reason}` : `Cannot thrive here: ${r.reason}` };
     }
     if (tool.id === 'biome') {
@@ -606,7 +625,7 @@ export class World {
       const period = el && el.bound ? el.period : 600;
       h = Math.min(Math.max(period / steps, ORBIT_DT), 4);
     }
-    const sub = Math.max(1, Math.ceil(h / 0.05));
+    const sub = Math.min(6, Math.max(1, Math.ceil(h / 0.05)));
     const acc = new Float64Array(clones.length * 3);
     const out = [];
     for (let s = 0; s < steps; s++) {
@@ -714,14 +733,17 @@ export class World {
   // ---------------- erosion experiment ----------------
   startErosionExperiment(body) {
     if (!body || !body.surface) return null;
-    let dir = body.labPeak;
-    if (!dir) {
-      const s = body.surface;
-      let hi = 0;
-      for (let i = 0; i < s.count; i++) if (s.bed[i] > s.bed[hi]) hi = i;
-      dir = [s.grid.dir[hi * 3], s.grid.dir[hi * 3 + 1], s.grid.dir[hi * 3 + 2]];
-    }
+    // spring on the highest daylit peak (falls back to the highest peak anywhere)
     const s = body.surface;
+    const sun = this.starEnv(body).sunDir;
+    let hi = -1, hiAny = 0;
+    for (let i = 0; i < s.count; i++) {
+      if (s.bed[i] > s.bed[hiAny]) hiAny = i;
+      const lit = s.grid.dir[i * 3] * sun[0] + s.grid.dir[i * 3 + 1] * sun[1] + s.grid.dir[i * 3 + 2] * sun[2];
+      if (lit > 0.35 && (hi < 0 || s.bed[i] > s.bed[hi])) hi = i;
+    }
+    if (hi < 0) hi = hiAny;
+    const dir = [s.grid.dir[hi * 3], s.grid.dir[hi * 3 + 1], s.grid.dir[hi * 3 + 2]];
     for (let i = 0; i < s.count; i++) s.baseE[i] = s.bed[i] + s.sed[i];
     this.settings.surfaceSpeed = 8;
     this.settings.erosion = 6;

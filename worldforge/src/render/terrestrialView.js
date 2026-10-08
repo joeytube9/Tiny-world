@@ -61,7 +61,10 @@ export class TerrestrialView extends BodyViewBase {
     this.cloudTopo = getTopology(s.grid, 1);
     const T = this.topo;
     this.cornerGround = new Float32Array(T.cornerCount);
-    this.cornerHead = new Float32Array(T.cornerCount);
+    this.cornerHead = new Float32Array(T.cornerCount); // mean water-surface radius x wetness
+    this.cornerWet = new Float32Array(T.cornerCount); // fraction of touching cells that are wet
+    this.cellWet = new Float32Array(s.count);
+    this.cellHW = new Float32Array(s.count);
     this.cornerR = new Float32Array(T.cornerCount);
     this.cornerG = new Float32Array(T.cornerCount);
     this.cornerB = new Float32Array(T.cornerCount);
@@ -85,6 +88,7 @@ export class TerrestrialView extends BodyViewBase {
     this.water = [];
     this.micro = [];
     const amp = 0.0055 * s.Rs * (this.body.roughness || 1);
+    this.microK = 0.22 / Math.max(1e-6, amp);
     const seed = this.body.seed + 17;
     for (let f = 0; f < 6; f++) {
       const F = T.faces[f];
@@ -171,8 +175,15 @@ export class TerrestrialView extends BodyViewBase {
       for (let i = 0; i < s.count; i++) this.cellBase[i] = s.Rs + s.baseE[i];
       T.cornerMean(this.cellBase, this.cornerGround);
     } else T.cornerMean(s.ground, this.cornerGround);
-    for (let i = 0; i < s.count; i++) this.cellDepth[i] = s.head[i] - s.ground[i];
-    T.cornerMean(this.cellDepth, this.cornerHead); // corner mean depth
+    // water surface from wet cells only: the sea level extends flat and the terrain
+    // itself cuts the shoreline (no averaging of ocean depth onto beaches)
+    for (let i = 0; i < s.count; i++) {
+      const wet = s.head[i] - s.ground[i] > 0.0015 ? 1 : 0;
+      this.cellWet[i] = wet;
+      this.cellHW[i] = wet * s.head[i];
+    }
+    T.cornerMean(this.cellHW, this.cornerHead);
+    T.cornerMean(this.cellWet, this.cornerWet);
     cellColors(b, this.cellRGB, this.cellGlow, this.ctx.settings.overlay);
     T.cornerMean(this.cellRGB, this.cornerR, 3, 0);
     T.cornerMean(this.cellRGB, this.cornerG, 3, 1);
@@ -187,14 +198,15 @@ export class TerrestrialView extends BodyViewBase {
   }
   waterAt(x, y, z) {
     const g = this.topo.sample(this.cornerGround, x, y, z);
-    const d = this.topo.sample(this.cornerHead, x, y, z);
-    return d > 0.002 ? g + d : g - 0.01;
+    const wet = this.topo.sample(this.cornerWet, x, y, z);
+    if (wet < 0.25) return g - 0.01;
+    const h = this.topo.sample(this.cornerHead, x, y, z) / wet;
+    return h > g + 0.0015 ? h : g - 0.01;
   }
-  // highest surface (for picking), includes micro relief approx
+  // highest surface (for picking)
   surfaceAt(x, y, z) {
     const g = this.topo.sample(this.cornerGround, x, y, z);
-    const d = this.topo.sample(this.cornerHead, x, y, z);
-    return g + Math.max(0, d);
+    return Math.max(g, this.waterAt(x, y, z));
   }
 
   updateFace(f) {
@@ -211,21 +223,25 @@ export class TerrestrialView extends BodyViewBase {
     const wrain = wmesh.geometry.attributes.aRain.array;
     const micro = this.micro[f];
     const { ci4, w4, dir } = F;
-    const cg = this.cornerGround, ch = this.cornerHead, cr = this.cornerR, cgc = this.cornerG, cb = this.cornerB, cgl = this.cornerGlow, crn = this.cornerRain;
+    const cg = this.cornerGround, ch = this.cornerHead, cw = this.cornerWet, cr = this.cornerR, cgc = this.cornerG, cb = this.cornerB, cgl = this.cornerGlow, crn = this.cornerRain;
     for (let v = 0; v < V; v++) {
       const k0 = ci4[v * 4], k1 = ci4[v * 4 + 1], k2 = ci4[v * 4 + 2], k3 = ci4[v * 4 + 3];
       const a0 = w4[v * 4], a1 = w4[v * 4 + 1], a2 = w4[v * 4 + 2], a3 = w4[v * 4 + 3];
       const gr = cg[k0] * a0 + cg[k1] * a1 + cg[k2] * a2 + cg[k3] * a3;
-      const dep = ch[k0] * a0 + ch[k1] * a1 + ch[k2] * a2 + ch[k3] * a3;
+      const wsum = cw[k0] * a0 + cw[k1] * a1 + cw[k2] * a2 + cw[k3] * a3;
+      const hsum = ch[k0] * a0 + ch[k1] * a1 + ch[k2] * a2 + ch[k3] * a3;
       const r = gr + micro[v];
+      const head = wsum > 0.2 ? hsum / wsum : 0;
       const dx = dir[v * 3], dy = dir[v * 3 + 1], dz = dir[v * 3 + 2];
       pos[v * 3] = dx * r; pos[v * 3 + 1] = dy * r; pos[v * 3 + 2] = dz * r;
-      col[v * 3] = cr[k0] * a0 + cr[k1] * a1 + cr[k2] * a2 + cr[k3] * a3;
-      col[v * 3 + 1] = cgc[k0] * a0 + cgc[k1] * a1 + cgc[k2] * a2 + cgc[k3] * a3;
-      col[v * 3 + 2] = cb[k0] * a0 + cb[k1] * a1 + cb[k2] * a2 + cb[k3] * a3;
+      // subtle texture: brighten micro-ridges, darken hollows
+      const tex = 1 + micro[v] * this.microK;
+      col[v * 3] = (cr[k0] * a0 + cr[k1] * a1 + cr[k2] * a2 + cr[k3] * a3) * tex;
+      col[v * 3 + 1] = (cgc[k0] * a0 + cgc[k1] * a1 + cgc[k2] * a2 + cgc[k3] * a3) * tex;
+      col[v * 3 + 2] = (cb[k0] * a0 + cb[k1] * a1 + cb[k2] * a2 + cb[k3] * a3) * tex;
       glow[v] = cgl[k0] * a0 + cgl[k1] * a1 + cgl[k2] * a2 + cgl[k3] * a3;
-      const wd = dep - micro[v] * 0.6;
-      const wr = wd > 0.0015 ? gr + dep : gr - 0.02;
+      const wd = head > 0 ? head - r : -1;
+      const wr = wd > 0 ? head : gr - 0.02;
       wpos[v * 3] = dx * wr; wpos[v * 3 + 1] = dy * wr; wpos[v * 3 + 2] = dz * wr;
       wdep[v] = Math.max(0, wd);
       wrain[v] = crn[k0] * a0 + crn[k1] * a1 + crn[k2] * a2 + crn[k3] * a3;
@@ -233,7 +249,8 @@ export class TerrestrialView extends BodyViewBase {
     mesh.geometry.attributes.position.needsUpdate = true;
     mesh.geometry.attributes.color.needsUpdate = true;
     mesh.geometry.attributes.aGlow.needsUpdate = true;
-    mesh.geometry.computeVertexNormals();
+    gridNormals(pos, mesh.geometry.attributes.normal.array, T.M);
+    mesh.geometry.attributes.normal.needsUpdate = true;
     wmesh.geometry.attributes.position.needsUpdate = true;
     wmesh.geometry.attributes.aDepth.needsUpdate = true;
     wmesh.geometry.attributes.aRain.needsUpdate = true;
@@ -433,7 +450,29 @@ export class TerrestrialView extends BodyViewBase {
           v.funnel = m;
           v.objs.push(m);
         }
+        if (st.type === 'hurricane' || st.type === 'tornado') {
+          const tg = new THREE.BufferGeometry();
+          tg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(64 * 3), 3));
+          const line = new THREE.Line(tg, new THREE.LineBasicMaterial({ color: st.type === 'tornado' ? 0xffb070 : 0xb8e0ff, transparent: true, opacity: 0.7, depthTest: true }));
+          line.frustumCulled = false;
+          line.renderOrder = 9;
+          this.spinG.add(line);
+          v.track = line;
+          v.objs.push(line);
+        }
         this.stormVis.set(st.id, v);
+      }
+      if (v.track) {
+        // storm track drawn on the surface (planet-local, so it rotates with the body)
+        const arr = v.track.geometry.attributes.position.array;
+        const pts = st.track.concat([{ p: st.pos }]).slice(-64);
+        for (let k = 0; k < pts.length; k++) {
+          const q = pts[k].p;
+          const r = this.surfaceAt(q[0], q[1], q[2]) + 0.03 * (s.Rs / 10);
+          arr[k * 3] = q[0] * r; arr[k * 3 + 1] = q[1] * r; arr[k * 3 + 2] = q[2] * r;
+        }
+        v.track.geometry.setDrawRange(0, pts.length);
+        v.track.geometry.attributes.position.needsUpdate = true;
       }
       const p = new THREE.Vector3(st.pos[0], st.pos[1], st.pos[2]);
       const R = this.surfaceAt(p.x, p.y, p.z);
@@ -682,16 +721,25 @@ export class TerrestrialView extends BodyViewBase {
     this._detailCooldown = (this._detailCooldown || 0) - dt;
     // progressive mesh refresh
     this._faceTimer = (this._faceTimer || 0) + dt;
-    const facesPerFrame = selected ? (settings.quality === 'low' ? 1 : 2) : 0;
+    // one face per frame for the selected body; faces turned away from the camera
+    // refresh at a quarter of the rate. Unselected bodies: one face every 0.25 s.
     const interval = selected ? 0 : 0.25;
     if (this._faceTimer >= interval) {
       this._faceTimer = 0;
-      const nFaces = Math.max(1, facesPerFrame);
-      for (let k = 0; k < nFaces; k++) {
-        if (this.faceCursor === 0) this.prepareCorners();
-        this.updateFace(this.faceCursor);
-        this.fixSeams(this.faceCursor);
-        this.faceCursor = (this.faceCursor + 1) % 6;
+      this._frameN = (this._frameN || 0) + 1;
+      const invS = new THREE.Matrix4().copy(this.spinG.matrixWorld).invert();
+      const cam = camera.position.clone().applyMatrix4(invS).normalize();
+      const FN = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+      for (let tries = 0; tries < 6; tries++) {
+        const f = this.faceCursor;
+        const facing = FN[f][0] * cam.x + FN[f][1] * cam.y + FN[f][2] * cam.z;
+        const skip = selected && facing < -0.35 && this._frameN % 4 !== 0;
+        if (f === 0) this.prepareCorners();
+        this.faceCursor = (f + 1) % 6;
+        if (skip) continue;
+        this.updateFace(f);
+        this.fixSeams(f);
+        break;
       }
     }
     if (this.cloudCursor === 0) this.prepareClouds();
@@ -718,6 +766,14 @@ export class TerrestrialView extends BodyViewBase {
       this.meanWind = ws / Math.max(1, wn);
     }
     this.waterMat.uniforms.uWave.value = Math.min(1.5, (this.meanWind || 0) / 4);
+    // skip the water pass entirely on bodies with no liquid water (e.g. airless moons)
+    if (!this._wT || this._wT < time) {
+      this._wT = time + 1;
+      let W = 0;
+      for (let i = 0; i < s.count; i++) W += s.w[i];
+      this.hasWater = W > 1e-6 || b.pending.length > 0;
+    }
+    for (const m of this.water) m.visible = this.hasWater;
     // atmosphere
     const A = b.atmosphere;
     const top = Math.max(b.radiusCache, s.Rs);
@@ -725,7 +781,11 @@ export class TerrestrialView extends BodyViewBase {
     this.atmo.visible = A > 0.002;
     this.atmo.scale.setScalar(top * (1 + thick) + 0.1);
     this.atmo.material.uniforms.uSun.value.copy(sun);
-    this.atmo.material.uniforms.uStrength.value = Math.min(1.6, 0.35 + Math.sqrt(A) * 0.8);
+    this.atmo.material.uniforms.uStrength.value = Math.min(1.6, 0.35 + Math.sqrt(A) * 0.8) + (frame.unlocks && frame.unlocks.includes('Aurora rim glow') ? 0.35 : 0);
+    const baseCol = b.atmoColor || [0.45, 0.7, 1];
+    const aqua = frame.unlocks && frame.unlocks.includes('Aqua atmosphere tint');
+    this.atmo.material.uniforms.uColor.value.setRGB(aqua ? baseCol[0] * 0.5 + 0.1 : baseCol[0], aqua ? baseCol[1] * 0.5 + 0.48 : baseCol[1], aqua ? baseCol[2] * 0.5 + 0.45 : baseCol[2]);
+    this.cloudMat.uniforms.uDeckColor.value.setRGB(...(b.cloudDeck ? [0.95, 0.85, 0.6] : frame.unlocks && frame.unlocks.includes('Storm-chaser cloud style') ? [0.8, 0.88, 1.0] : [0.95, 0.85, 0.6]));
     for (const m of this.clouds) m.visible = A > 0.004;
     // sun in local (for storm disc lighting)
     const inv = new THREE.Matrix4().copy(this.spinG.matrixWorld).invert();
@@ -759,6 +819,25 @@ export class TerrestrialView extends BodyViewBase {
 
   stats() {
     return { particles: this.pCount || 0, plants: this.life ? this.life.plantCount || 0 : 0, animals: this.life ? this.life.animalCount || 0 : 0 };
+  }
+}
+
+// Fast normals for a regular (M+1)x(M+1) face grid: central differences along the
+// grid axes (one-sided at edges; seams are then averaged across faces by fixSeams).
+function gridNormals(p, n, M) {
+  const W = M + 1;
+  for (let j = 0; j <= M; j++) {
+    const j0 = j > 0 ? j - 1 : j, j1 = j < M ? j + 1 : j;
+    for (let i = 0; i <= M; i++) {
+      const i0 = i > 0 ? i - 1 : i, i1 = i < M ? i + 1 : i;
+      const a = (j * W + i0) * 3, b = (j * W + i1) * 3, c = (j0 * W + i) * 3, d = (j1 * W + i) * 3;
+      const ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2];
+      const vx = p[d] - p[c], vy = p[d + 1] - p[c + 1], vz = p[d + 2] - p[c + 2];
+      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const l = Math.hypot(nx, ny, nz) || 1;
+      const o = (j * W + i) * 3;
+      n[o] = nx / l; n[o + 1] = ny / l; n[o + 2] = nz / l;
+    }
   }
 }
 

@@ -28,9 +28,9 @@ export class GameRenderer {
     this.stars = this.makeStarfield();
     this.scene.add(this.stars);
     // lights
-    this.ambient = new THREE.AmbientLight(0x8a9cc8, 0.42);
+    this.ambient = new THREE.AmbientLight(0x8a9cc8, 0.5);
     this.scene.add(this.ambient);
-    this.hemi = new THREE.HemisphereLight(0x9fb8ff, 0x1a1408, 0.18);
+    this.hemi = new THREE.HemisphereLight(0x9fb8ff, 0x1a1408, 0.22);
     this.scene.add(this.hemi);
     this.sunLight = new THREE.DirectionalLight(0xfff4e6, 2.4);
     this.scene.add(this.sunLight);
@@ -434,6 +434,20 @@ export class GameRenderer {
       const dir = wp.clone().applyMatrix4(inv).normalize();
       return { type: 'body', body: first, hit: { bodyId: first.id, dir: [dir.x, dir.y, dir.z], world: wp, t: along[0].t }, center: c };
     }
+    // small bodies: accept taps within a comfortable screen radius (≥ 24 px)
+    if (opts.loose !== false) {
+      let best = null, bd = Infinity;
+      const f = this.height / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
+      for (const b of this.world.bodies) {
+        const c = new THREE.Vector3(...b.pos);
+        const pr = this.project(c);
+        if (!pr.visible) continue;
+        const pixR = (b.radiusCache / Math.max(1e-3, c.distanceTo(this.camera.position))) * f;
+        const d = Math.hypot(pr.x - x, pr.y - y);
+        if (d < Math.max(24, pixR * 1.2) && d < bd) { bd = d; best = b; }
+      }
+      if (best) return { type: 'body', body: best, hit: null, loose: true };
+    }
     // space: intersect the ecliptic plane through the focus point
     const focusY = sel ? sel.pos[1] : 0;
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -focusY);
@@ -487,7 +501,7 @@ export class GameRenderer {
       v.update({
         dt, time: this.time, surfaceTime: world.time.surface, sunWorld, camera: this.camera, settings: this.settings,
         selected: v.body === sel, camDist: this.camera.position.distanceTo(new THREE.Vector3(...v.body.pos)),
-        events, cutaway: this.cutaway, pointScale,
+        events, cutaway: this.cutaway, pointScale, unlocks: world.unlocks,
       });
     }
     this.updateOrbitVisuals(dt);

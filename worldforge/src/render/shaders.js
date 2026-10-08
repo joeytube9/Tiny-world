@@ -55,7 +55,8 @@ export function makeWaterMaterial(scale) {
         vec3 N0 = normalize(vNormalW);
         float t = uTime * uMotion;
         vec3 p = vLocal * (6.0/uScale);
-        float amp = 0.05 + 0.25*uWave;
+        float camDist0 = length(cameraPosition - vWorldPos);
+        float amp = (0.05 + 0.25*uWave) * (1.0 - 0.75*smoothstep(3.0*uScale, 20.0*uScale, camDist0));
         vec3 pert = vec3(vnoise(p*3.0+vec3(t*0.6,0.0,t*0.3)), vnoise(p*3.0+vec3(5.0,t*0.5,1.0)), vnoise(p*3.0+vec3(1.0,2.0,t*0.7))) - 0.5;
         pert += 0.5*(vec3(vnoise(p*9.0+t*1.3), vnoise(p*9.0+3.0-t), vnoise(p*9.0+7.0+t)) - 0.5);
         vec3 N = normalize(N0 + pert*amp);
@@ -65,7 +66,7 @@ export function makeWaterMaterial(scale) {
         vec3 col = mix(uShallow, uDeep, pow(depthN, 0.6));
         float diff = max(dot(N, uSun), 0.0)*0.75 + 0.25;
         vec3 H = normalize(uSun + V);
-        float spec = pow(max(dot(N, H), 0.0), 90.0) * 1.4 * day;
+        float spec = pow(max(dot(N, H), 0.0), 140.0) * 0.9 * day;
         float fres = pow(1.0 - max(dot(N, V), 0.0), 4.0);
         col = col*diff*(0.2+0.8*day) + vec3(1.0,0.95,0.85)*spec + vec3(0.5,0.7,0.9)*fres*0.35*day;
         // shore foam
@@ -81,7 +82,7 @@ export function makeWaterMaterial(scale) {
           float ring = smoothstep(0.04, 0.0, abs(length(fp.xy+fp.z*0.3) - ph*0.5)) * (1.0-ph);
           col += vec3(0.6)*ring*min(1.0, vRain*3.0)*day;
         }
-        float alpha = mix(0.5, 0.95, smoothstep(0.004*uScale, 0.12*uScale, d));
+        float alpha = mix(0.5, 0.9, smoothstep(0.004*uScale, 0.12*uScale, d));
         alpha = max(alpha, foam*0.8);
         gl_FragColor = vec4(col, alpha);
       }`,

@@ -124,7 +124,8 @@ export function sculpt(body, mode, dir, radius, strength, dt, matKey = 'rock') {
 export function pour(body, matKey, dir, radius, rate, dt, time, opts = {}) {
   const s = body.surface;
   const vol = rate * dt;
-  if (vol <= 0) return null;
+  if (!(vol > 0) || !Number.isFinite(vol) || !Number.isFinite(radius) || !Number.isFinite(time)) return null;
+  if (!dir || dir.length !== 3 || !dir.every(Number.isFinite) || Math.hypot(dir[0], dir[1], dir[2]) < 1e-6) return null;
   const { cells, wts, sum } = brushCells(s, dir, radius);
   const nw = new Float32Array(wts.length);
   for (let k = 0; k < wts.length; k++) nw[k] = wts[k] / sum;

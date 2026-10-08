@@ -177,7 +177,12 @@ input, select { font: inherit; }
 .goal { margin: 4px 0 8px; }
 .goal.done .g-t { color: var(--good); }
 .goal small { color: var(--dim); }
-@media (max-width: 600px) { .goals { width: 170px; top: calc(130px + var(--sat)); } .goals:not(.collapsed) .goal small { display: none; } }
+@media (max-width: 600px) {
+  .goals { width: 170px; top: calc(134px + var(--sat)) !important; }
+  .goals.collapsed { width: auto; padding: 2px 10px; }
+  .goals:not(.collapsed) .goal small { display: none; }
+  .toasts { top: calc(178px + var(--sat)) !important; }
+}
 
 .jobbar { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--tabh) + 10px + var(--sab)); display: flex; align-items: center; gap: 8px; background: var(--glass2); border: 1px solid var(--accent); border-radius: 999px; padding: 4px 6px 4px 12px; font-size: 12px; width: min(420px, calc(100vw - 20px)); z-index: 3; }
 .panel:not(.hidden) ~ .jobbar { display: none; }
@@ -192,3 +197,5 @@ input, select { font: inherit; }
 .modal-box { background: var(--glass2); border: 1px solid var(--line); border-radius: 16px; width: min(460px, 100%); max-height: 86vh; display: flex; flex-direction: column; }
 .modal-box.small { padding: 16px; }
 .modal-box .panel-body { overflow-y: auto; }
+
+.unlocks { font-size: 11px; color: var(--accent2); margin: 4px 0 6px; }

@@ -198,7 +198,9 @@ export function dropAnimals(body, sp, pos, count, rng, settings, override = fals
     body.agents.push(makeAgent(body, sp, q, rng, { override: suit < 0.05 }));
     placed++;
   }
-  return { placed, reason: placed === 0 ? det.reason || 'Population cap reached' : suit < 0.05 ? 'EXPERIMENTAL OVERRIDE: unsuitable habitat, likely to die.' : det.reason || '' };
+  const aggregated = count - placed;
+  if (placed === 0 && body.agents.length >= cap) return { placed: 0, aggregated, reason: `Explicit population cap (${cap}) reached — ${aggregated} added to the aggregated population instead.` };
+  return { placed, aggregated: 0, reason: placed === 0 ? det.reason || 'Unsuitable habitat' : suit < 0.05 ? 'EXPERIMENTAL OVERRIDE: unsuitable habitat, likely to die.' : det.reason || '' };
 }
 
 // ---------------- vegetation step ----------------

@@ -175,7 +175,7 @@ class App {
     const w = this.world;
     if (t.id === 'place') {
       const p = this.renderer.pick(x, y, { agents: false });
-      if (p.type !== 'space' || !p.point) return this.toast('Tap empty space (not a body) to place it.', 'warn');
+      if (p.type !== 'space' || !p.point) return this.toast('Tap empty space (not on or right next to a body) to place it.', 'warn');
       this.pushUndo('system', 'Place body');
       try {
         const b = w.spawnBody(t.placePreset, { pos: p.point.toArray() });
@@ -198,7 +198,7 @@ class App {
     }
     // tap tools apply to the body under the finger (if not blocked)
     const p = this.renderer.pick(x, y, { agents: false });
-    if (p.type !== 'surface' && p.type !== 'body') return this.toast('Tap a planet surface.', 'warn');
+    if ((p.type !== 'surface' && p.type !== 'body') || !p.hit) return this.toast('Tap a planet surface.', 'warn');
     if (p.blocked) return this.toast('Another body is in front of that point.', 'warn');
     if (p.body.id !== w.selectedId) this.select(p.body.id, false);
     this.pushUndo('body', info.name);
@@ -500,8 +500,8 @@ class App {
     const v = r.views.get(b.id);
     const d = ex.dir;
     r.cam.anchorLocal = new (r.camera.position.constructor)(d[0], d[1], d[2]).multiplyScalar(v.surfaceAt(d[0], d[1], d[2]));
-    r.cam.dist = b.surface.Rs * 0.35;
-    r.cam.pitch = 0.75;
+    r.cam.dist = b.surface.Rs * 0.3;
+    r.cam.pitch = 0.95;
     r.cutaway = false;
     this.toast('Erosion experiment running: spring on the highest peak, erosion ×6, surface time ×8. Toggle the Sediment overlay to see deposits.', 'info', 7000);
   }

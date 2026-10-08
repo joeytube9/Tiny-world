@@ -173,7 +173,8 @@ export class LifeView {
       if (S.habitat === 'air') {
         r = Math.max(r, wr) + (0.25 + a.alt) * scale * 4 + Math.sin(time * 0.8 + a.phase) * scale * 0.5;
       } else if (S.habitat === 'water') {
-        r = Math.max(r + sc * 0.3, wr - Math.min(0.05, Math.max(0.012, (wr - r) * 0.4)));
+        // swim at the surface so they read from above through opaque deep water
+        r = Math.max(r + sc * 0.3, wr - sc * 0.06 + Math.sin(time * 1.3 + a.phase) * sc * 0.03);
       } else if (S.key === 'insect') {
         r = Math.max(r, wr) + scale * (0.6 + 0.3 * Math.sin(time * 3 + a.phase));
         sc *= 1.6;
